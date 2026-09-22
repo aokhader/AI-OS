@@ -4,7 +4,7 @@ Computer-use automation for legacy banking software. An LLM figures out how to c
 
 Take-home assessment for interface.ai. The brief is at [docs/description.md](docs/description.md). The project's working knowledge base, read at the start of every session, is [docs/context/](docs/context/README.md).
 
-> Status: phase P0 (foundations). Setup, demo commands and the design write-up (`/REPORT.md`) land in later phases. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
+> Status: phase P1 complete. Deterministic replay of a hand-written capability works end to end against the mock app; LLM discovery arrives in P2 and the design write-up (`/REPORT.md`) in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
 
 ## Layout
 
@@ -20,13 +20,32 @@ data/app-profiles/           per vendor product profiles (committed)
 docs/context/                architecture, data model, decisions, roadmap
 ```
 
-## Quick start (P0)
+## Quick start
 
 ```bash
 pnpm install
+pnpm --filter @handsoff/surface-playwright exec playwright install chromium
 cp .env.example .env
 pnpm dev          # mock legacy bank app on http://localhost:4100 (sign in: teller / value of LEGACY_BANK_PASS)
-pnpm test         # schema and mock-app tests, no browser, no API key
+```
+
+Replay a saved capability with no LLM involved (in a second terminal; the browser opens headed unless `HANDSOFF_HEADLESS=true`):
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001
+```
+
+Exit code 0 and `{"savingsBalance": 1250.75}` on stdout; the run folder with screenshots, `events.jsonl` and `result.json` is printed on stderr. An unknown member is a business outcome, not a failure:
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=99999   # outcome MEMBER_NOT_FOUND, exit 3
+```
+
+Checks:
+
+```bash
+pnpm test               # schema, resolver, classifier and mock-app tests; no browser, no API key
+pnpm test:integration   # real headless Chromium against the in-process mock app; no API key
 pnpm typecheck
 pnpm lint
 ```

@@ -255,24 +255,31 @@ interface Recovery {
 ```ts
 interface Observation {
   at: string;
-  url?: string;
+  url?: string;                        // top document
   title: string;
+  frames: FrameInfo[];                 // { framePath, url, title } for every frame incl. the top document
   nodes: A11yNode[];
   dialogs: DialogInfo[];
   screenshot: ScreenshotRef;           // { path } once persisted; masked
-  digest: string;                      // hash over (url, title, roles+names+values of nodes)
+  digest: string;                      // hash over urls, roles, names, values and paths of nodes
 }
+
+interface FrameInfo { framePath: string[]; url: string; title: string }
 
 interface A11yNode {
   ref: string;
   role: string;
   name: string;
-  value?: string;
+  value?: string;                      // never emitted for password fields
   states: string[];
-  bbox: { x: number; y: number; w: number; h: number };
+  bbox: { x: number; y: number; w: number; h: number };   // page coordinates
   framePath: string[];
+  path: string;                        // "form[1]/table[1]/tr[2]/td[2]/input[1]"; tbody/thead/tfoot are transparent
   parentRef?: string;
 }
+
+/** What the surface returns; the engine persists the PNG and produces an Observation. */
+interface SurfaceObservation extends Omit<Observation, 'screenshot' | 'digest'> { screenshotPng?: Uint8Array }
 
 interface DialogInfo { kind: 'alert' | 'confirm' | 'prompt' | 'modal'; text: string; ref?: string }
 ```
@@ -424,10 +431,10 @@ This document defines data. Behaviour lives behind the six port interfaces in [0
 
 | Port | Implemented by | One line |
 |---|---|---|
-| `Surface` | `@handsoff/surface-playwright` | observe, act, resolve, capture human actions |
+| `Surface` | `@handsoff/surface-playwright` | observe, act on a ref, close; human-action capture in P6. Resolution is `resolveTarget()` in core, not a surface method |
 | `Planner` | `@handsoff/llm-anthropic`; `ScriptedPlanner` in core for tests | one `Decision` per observation during discovery |
 | `RecoveryPlanner` | `@handsoff/llm-anthropic`, optional | at most one proposed `Action` for a failed replay step |
-| `Store` | filesystem implementation in core | capabilities, runs, escalations, app profiles |
+| `Store` | filesystem implementation in core (`createFsStore`) | capabilities, runs (a `RunHandle` appends events and writes screenshots, snapshots and the result), escalations, app profiles; everything read from disk is validated with its zod schema |
 | `PolicyGate` | core | `Verdict` for every action before it executes |
 | `Redactor` | core | masks observations, screenshots, params and transcripts |
 

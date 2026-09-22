@@ -6,16 +6,15 @@
   "version": 1,
   "status": "draft",
   "provenance": {
-    "runId": "run_20260924_143012_a1b2",
-    "model": "claude-opus-5",
-    "effort": "high",
-    "recordedAt": "2026-09-24T14:32:40Z",
+    "runId": "hand-written",
+    "model": "none",
+    "recordedAt": "2026-09-21T00:00:00Z",
     "variantId": "first-example-cu",
-    "compiler": "handsoff@0.1.0"
+    "compiler": "hand-written for P1; discovery replaces this in P2"
   },
   "app": { "vendorProductId": "acme-coreteller", "surfaceKind": "legacy-web" },
   "entry": {
-    "route": "/members",
+    "route": "/",
     "requiresAuth": true,
     "preconditions": [
       {
@@ -155,9 +154,8 @@
               { "kind": "role", "role": "link", "name": "View" },
               {
                 "kind": "anchored",
-                "anchor": "Member #",
-                "relation": "same-row-column",
-                "column": "Action",
+                "anchor": "Search Results",
+                "relation": "below",
                 "role": "link"
               },
               { "kind": "structural", "path": "table[2] > tr[2] > td[4] > a[1]" }
@@ -169,13 +167,7 @@
       "target": {
         "strategies": [
           { "kind": "role", "role": "link", "name": "View" },
-          {
-            "kind": "anchored",
-            "anchor": "Member #",
-            "relation": "same-row-column",
-            "column": "Action",
-            "role": "link"
-          },
+          { "kind": "anchored", "anchor": "Search Results", "relation": "below", "role": "link" },
           { "kind": "structural", "path": "table[2] > tr[2] > td[4] > a[1]" }
         ],
         "framePath": ["main"]
@@ -283,9 +275,8 @@
               { "kind": "role", "role": "link", "name": "Open" },
               {
                 "kind": "anchored",
-                "anchor": "Member Number",
-                "relation": "same-row-column",
-                "column": "Actions",
+                "anchor": "Search Results",
+                "relation": "below",
                 "role": "link"
               }
             ],

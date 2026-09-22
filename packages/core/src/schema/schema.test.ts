@@ -13,7 +13,6 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
-const fixtures = path.resolve(here, '../../test/fixtures');
 
 function readJson(file: string): unknown {
   return JSON.parse(readFileSync(file, 'utf8'));
@@ -28,7 +27,7 @@ function issues(result: { success: boolean; error?: { issues: unknown[] } }): st
 }
 
 const exampleCapability = readJson(
-  path.join(fixtures, 'capability.get-member-savings-balance.v1.json'),
+  path.join(repoRoot, 'data/capabilities/get-member-savings-balance/v1.json'),
 ) as Record<string, unknown>;
 
 describe('CapabilitySchema', () => {

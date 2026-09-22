@@ -12,6 +12,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 |---|---|---|---|
 | 2026-09-21 | 1 | `docs/context/` created: overview, architecture, tech stack and data model, decision log; skeletons for UI, roadmap, tracker, AI rules, code standards; root `CLAUDE.md` | P0: workspace scaffold, mock app happy path, core schemas |
 | 2026-09-21 | 2 | P0 complete. pnpm workspace with six packages; Biome, vitest, base tsconfig; core zod schemas with cross-field rules and 24 tests; JSON Schema export; app profile and policy files validate; legacy-bank happy path (frameset, tables, no ids) with 11 supertest tests, variant B branding and labels included; CLI skeleton; console shell. Docs updated: D-025, stack table, bootstrap credentials, policy patterns | P1: `surface-playwright` observe / act / resolve, filesystem store, replay engine skeleton, hand-written artifact replays with zero LLM |
+| 2026-09-21 | 3 | P1 complete. `surface-playwright` with an in-page walker (roles, names, values, bounding boxes, frame paths, structural paths), acting by ref, native dialog tracking; pure `resolveTarget` with the three strategies; predicate evaluation and the ordered classifier; replay engine with bootstrap, preconditions, postcondition waits, output extraction and the full result contract; filesystem store; `handsoff replay` CLI; Chromium integration test. `pnpm handsoff replay … memberId=10001` → success, savingsBalance 1250.75, 3.4 s, 14 screenshots; `memberId=99999` → outcome MEMBER_NOT_FOUND at s2, exit 3. Decisions D-026, D-027 | P2: Anthropic planner, discovery loop, redaction of params in observation and transcript, one real run copied to `/evidence/` |
 
 ## Phases
 
@@ -24,13 +25,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 - [x] Example artifact validates against `CapabilitySchema`; `data/app-profiles/acme-coreteller.json` and `config/policy.json` validate too
 
 ### P1 · Surface and hand-written replay
-- [ ] `observe()` with refs, frame paths, screenshot, dialogs, digest
-- [ ] `act()` for all action kinds
-- [ ] `resolve()` with `role`, `anchored`, `structural`; reports `resolvedBy`, `candidateCount`
-- [ ] Filesystem `Store`
-- [ ] Replay engine skeleton with postcondition waits
-- [ ] Event log and screenshots
-- [ ] Hand-written `get-member-savings-balance` replays to `success`
+- [x] `observe()` with refs, frame paths, screenshot, dialogs, digest (plus per-frame URLs and structural paths)
+- [x] `act()` for all action kinds (extract is read from the observation by the engine)
+- [x] `resolveTarget()` with `role`, `anchored`, `structural`; reports `resolvedBy`, `candidateCount`; pure, 9 unit tests
+- [x] Filesystem `Store`
+- [x] Replay engine with bootstrap, preconditions, postcondition waits, classifier, outputs, result contract
+- [x] Event log and screenshots (before/after every step; snapshot JSON on failure)
+- [x] Hand-written `get-member-savings-balance` replays to `success` (CLI and integration test); unknown member → `outcome`
 
 ### P2 · Discovery
 - [ ] Planner with strict tools and `{ param }` values

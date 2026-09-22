@@ -39,6 +39,8 @@ Rules:
 | D-023 | `core` has no runtime dependencies; LLM adapter is a separate package | accepted |
 | D-024 | Chaos modes: four required, two optional | accepted |
 | D-025 | Packages export TypeScript source; no build step | accepted |
+| D-026 | Target resolution is a pure function in core; surfaces act on refs | accepted |
+| D-027 | An in-page walker instead of the browser's accessibility snapshot | accepted |
 
 ---
 
@@ -266,3 +268,21 @@ Date: 2026-09-21 · Status: accepted
 - **Alternatives.** `tsc -b` with project references emitting `dist/` and conditional exports so tests can still hit source.
 - **Why.** Nothing in the demo runs under plain `node`. A build step adds a "did you build?" failure mode and a second module-resolution story for no reviewer benefit, and the brief grades "easy to run" (§7).
 - **Consequences.** Publishing these packages would need a build; not a goal. zod 4's built-in `z.toJSONSchema` replaces the `zod-to-json-schema` dependency named in the first draft of the tech stack doc. `skipLibCheck` is on so third-party declarations are not re-checked.
+
+## D-026 · Target resolution is a pure function in core; surfaces act on refs
+
+Date: 2026-09-21 · Status: accepted
+
+- **Decision.** `resolveTarget(nodes, spec)` lives in `@handsoff/core` and works on the node list of an observation. It returns the ref of the one matching node plus `resolvedBy` and `candidateCount`, or what it tried and the nearest nodes. The `Surface` port has no `resolve` method; `act` takes an action whose target is a ref from the latest observation.
+- **Alternatives.** Resolution inside each surface adapter, for example as Playwright locators.
+- **Why.** The three strategies are the load-bearing robustness story (brief §3.2, §3.3) and must be testable on saved snapshots without a browser. One implementation gives identical semantics on every surface, so a desktop adapter inherits it. The adapter stays small: observe, act, close.
+- **Consequences.** The surface must emit enough structure for the strategies: structural paths, page-level bounding boxes, frame paths. Refs are valid only for the observation they came from, so the engine always observes before it acts.
+
+## D-027 · An in-page walker instead of the browser's accessibility snapshot
+
+Date: 2026-09-21 · Status: accepted
+
+- **Decision.** The Playwright surface evaluates its own walker in every frame. It derives roles from HTML semantics, accessible names as a screen reader would (label association, submit `value`, cell text), values (never for password fields), states, bounding boxes and structural paths with transparent table sections, and keeps element handles for the refs on the page.
+- **Alternatives.** Playwright's `page.accessibility.snapshot()` (deprecated; no refs, boxes or frames). `locator.ariaSnapshot()` (YAML; no boxes or structural paths). The CDP `Accessibility.getFullAXTree` (the real tree, but mapping nodes back to actable elements across frames is awkward).
+- **Why.** Replay needs refs it can act on, page-level boxes for masking and geometric anchoring, per-frame paths for framesets, and structural paths for the third strategy. Legacy markup also needs name rules the browser does not apply, such as treating a table cell as the label of the control beside it.
+- **Consequences.** About 250 lines of browser code we own; roles are HTML-semantic approximations, not the browser's computed roles. The walker is shipped to the page as source text with a shim for the helper esbuild injects under tsx, because Playwright does not invoke a string expression that evaluates to a function.

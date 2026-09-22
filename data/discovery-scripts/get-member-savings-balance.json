@@ -1,0 +1,31 @@
+[
+  {
+    "kind": "type",
+    "intent": "Enter the member number into the lookup field",
+    "target": {
+      "strategies": [{ "kind": "anchored", "anchor": "Member #", "relation": "labels", "role": "textbox" }],
+      "framePath": ["main"]
+    },
+    "value": { "param": "memberId" }
+  },
+  {
+    "kind": "click",
+    "intent": "Run the lookup",
+    "target": { "strategies": [{ "kind": "role", "role": "button", "name": "Search" }], "framePath": ["main"] }
+  },
+  {
+    "kind": "click",
+    "intent": "Open the matching member's detail page",
+    "target": { "strategies": [{ "kind": "role", "role": "link", "name": "View" }], "framePath": ["main"] }
+  },
+  {
+    "kind": "finish",
+    "summary": "The member detail page shows the accounts table with the Savings balance",
+    "outputs": {
+      "savingsBalance": {
+        "strategies": [{ "kind": "anchored", "anchor": "Savings", "relation": "same-row-column", "column": "Balance" }],
+        "framePath": ["main"]
+      }
+    }
+  }
+]

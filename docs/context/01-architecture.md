@@ -101,33 +101,42 @@ The interfaces below are the whole answer to brief §3.7's "surface abstraction"
 
 ```ts
 interface Surface {
-  observe(): Promise<Observation>;
-  act(action: Action, actor: Actor): Promise<ActResult>;
-  resolve(target: TargetSpec): Promise<Resolution>;
-  captureHumanActions(onStep: (step: RecordedStep) => void): Disposable;
-  info(): SurfaceInfo; // { kind: 'web' | 'legacy-web' | 'desktop-a11y', ... }
+  info(): SurfaceInfo;                                   // { kind: 'web' | 'legacy-web' | 'desktop-a11y', name }
+  observe(opts?: { screenshot?: boolean }): Promise<SurfaceObservation>;   // nodes, frames, dialogs, screenshot bytes
+  act(action: Action, ctx: { actor: Actor; values: ParamValues; baseUrl: string }): Promise<ActResult>;
+  close(): Promise<void>;
+  captureHumanActions(onStep: (step: RecordedStep) => void): Disposable;   // P6
 }
+// Target resolution is not a surface method. resolveTarget(nodes, spec) is a pure function in core;
+// the surface only has to act on a ref from its latest observation (D-026).
 
 interface Observation {
   at: string;                 // ISO timestamp
-  url?: string;               // web only; desktop reports window title + screen id
+  url?: string;               // top document; inside a frameset it stays put while frames navigate
   title: string;
-  nodes: A11yNode[];          // flattened accessibility tree
-  dialogs: DialogInfo[];      // open modal/alert/confirm dialogs
-  screenshot: ScreenshotRef;  // PNG path or buffer, already masked by the Redactor
-  digest: string;             // stable hash of the semantically relevant parts, for change detection
+  frames: FrameInfo[];        // every frame including the top document: { framePath, url, title }
+  nodes: A11yNode[];          // flattened accessibility-style tree
+  dialogs: DialogInfo[];      // open native or modal dialogs
+  screenshot: ScreenshotRef;  // PNG path, masked by the Redactor (P5)
+  digest: string;             // stable hash of urls, roles, names, values and structure
 }
 
 interface A11yNode {
   ref: string;                // "e12", stable within one observation only
-  role: string;               // button, textbox, cell, link, ...
-  name: string;               // accessible name
-  value?: string;             // masked if bound to a sensitive param
-  states: string[];           // focused, disabled, checked, expanded, ...
-  bbox: { x: number; y: number; w: number; h: number };
-  framePath: string[];        // [] for top document; ["main"] for frame named main; ["nav", "sub"] nested
+  role: string;               // button, textbox, combobox, link, cell, columnheader, heading, text, ...
+  name: string;               // accessible name; '' for a legacy input with no label
+  value?: string;             // masked if bound to a sensitive param; never emitted for password fields
+  states: string[];           // focused, disabled, checked, readonly, required
+  bbox: { x: number; y: number; w: number; h: number };   // page coordinates, frame offsets applied
+  framePath: string[];        // [] for the top document; ["main"] for the frame named main
+  path: string;               // structural path inside the frame: "form[1]/table[1]/tr[2]/td[2]/input[1]"
   parentRef?: string;
 }
+```
+
+On the web the surface does not use the browser's built-in accessibility snapshot. A small in-page walker computes roles from HTML semantics, accessible names the way a screen reader would (label association, the `value` of a submit button, the text of a cell), values, states, bounding boxes and structural paths, and leaves element handles for the refs on the page so the surface can act on them. Table sections are transparent in paths, so `table[1]/tr[2]/td[2]` reads the way a person describes the layout ([D-027](08-decision-log.md#d-027--an-in-page-walker-instead-of-the-browsers-accessibility-snapshot)).
+
+```ts
 
 type Action =
   | { kind: 'click';    target: TargetRef }
@@ -252,7 +261,7 @@ type Strategy =
 2. **`anchored`** — relative to stable visible text. `{ anchor: 'Member #', relation: 'labels' }` is the input next to that label even when there is no `<label for>`. `{ anchor: 'Savings', relation: 'same-row-column', column: 'Balance' }` is the cell in the row whose leading cell says Savings, under the Balance header. This is the legacy-table workhorse: it survives column reordering, missing ids and nested tables, and it is the strategy that translates most directly to desktop grids. Defeated by relabelling (handled by variant label maps, §14).
 3. **`structural`** — frame path plus positional path. Last resort. Survives when text and roles are missing; defeated by any layout change.
 
-Resolution algorithm: walk the strategies in order; a strategy succeeds only if it matches **exactly one** visible, enabled element; record `resolvedBy` (index) and `candidateCount`. Compare with the step's discovery `baseline`: a deeper index or `candidateCount > 1` at a shallower one raises a `drift` event and, if policy says so, `DRIFT_SUSPECTED`. No match after all strategies is `TARGET_NOT_FOUND` with the strategies tried and the nearest candidates as evidence.
+Resolution algorithm: walk the strategies in order; a strategy succeeds only if it matches **exactly one** visible element; record `resolvedBy` (index) and `candidateCount`. `role` names match exactly after whitespace and case normalisation, falling back to a substring match only when no exact match exists. `structural` paths match as a suffix of the node's path, so `table[1] > tr[2] > td[2] > input[1]` still resolves when a `<form>` wraps the table; uniqueness within the frame is still required. Compare with the step's discovery `baseline`: a deeper index or `candidateCount > 1` at a shallower one raises a `drift` event and, if policy says so, `DRIFT_SUSPECTED`. No match after all strategies is `TARGET_NOT_FOUND` with the strategies tried and the nearest candidates as evidence.
 
 Visual anchoring (a bounding box plus a screenshot hash) is deliberately not a strategy. Coordinates are stalest exactly when they are needed. It remains a documented seam for screenshot-only surfaces where no tree exists.
 

@@ -8,10 +8,9 @@ coverage/
 .env.*
 !.env.example
 
-# runtime data: runs, compiled capabilities and escalations are generated;
-# app profiles are hand-written and committed
+# runtime data: runs and escalations are generated and ignored;
+# app profiles and capabilities are committed so replay works on a fresh clone without an API key
 data/runs/
-data/capabilities/
 data/escalations/
 
 # tooling

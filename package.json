@@ -13,6 +13,8 @@
     "handsoff": "tsx apps/runner/src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "evidence:copy": "tsx scripts/evidence-copy.ts",
     "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
