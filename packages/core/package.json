@@ -1,0 +1,25 @@
+{
+  "name": "@handsoff/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HandsOff domain: schemas, engines, policy gate, redaction, evidence. No runtime dependencies beyond zod.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "schema:export": "tsx scripts/export-json-schema.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.1"
+  }
+}

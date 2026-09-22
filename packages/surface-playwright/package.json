@@ -1,0 +1,23 @@
+{
+  "name": "@handsoff/surface-playwright",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Surface implementation over Playwright: observe, act, resolve, capture human actions.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@handsoff/core": "workspace:*",
+    "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "handsoff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Computer-use automation for legacy banking software: discover once with an LLM, replay deterministically, escalate to a human when stuck.",
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @handsoff/legacy-bank dev",
+    "handsoff": "tsx apps/runner/src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "schema:export": "pnpm --filter @handsoff/core schema:export"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.1"
+  }
+}

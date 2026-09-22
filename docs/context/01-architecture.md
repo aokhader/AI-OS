@@ -414,13 +414,13 @@ Policy is one file, `config/policy.json` ([D-015](08-decision-log.md#d-015--risk
 ```json
 {
   "allowedOrigins": ["http://localhost:4100", "http://localhost:4101"],
-  "allowedRoutes": ["/", "/login", "/members/**", "/accounts/**"],
+  "allowedRoutes": ["/", "/login", "/logout", "/nav", "/members", "/members/**"],
   "deniedRoutes": ["/admin/**"],
   "allowedActions": ["click", "type", "select", "press", "navigate", "wait", "extract"],
   "riskyPatterns": {
-    "buttonText": ["(?i)submit", "(?i)confirm", "(?i)post", "(?i)transfer", "(?i)delete", "(?i)close account"],
-    "formAction": ["/accounts/open", "/transactions/**"],
-    "routes": ["/accounts/*/close"]
+    "buttonText": ["submit", "confirm", "post", "transfer", "delete", "close account", "open account"],
+    "formAction": ["/members/*/accounts/open"],
+    "routes": ["/members/*/accounts/*/close"]
   },
   "riskyMode": { "discovery": "escalate", "replay": "require_approved" },
   "escalationTimeoutMs": 600000,
@@ -428,6 +428,8 @@ Policy is one file, `config/policy.json` ([D-015](08-decision-log.md#d-015--risk
   "assistedFallback": { "enabled": false, "maxPerRun": 2 }
 }
 ```
+
+Patterns in `riskyPatterns` are regular expressions or globs matched case-insensitively by the gate; there is no inline-flag syntax in JavaScript regular expressions, so the flag lives in the code, not the config.
 
 **One enforcement point.** `PolicyGate.check` runs before every `act` in both engines. It checks the action type, the origin and route of any navigation, and classifies **risk from the live observation**: the accessible name of the button, the form's action, the current route. A step recorded as `safe` whose live classification is `risky` produces a `policy_mismatch` event and is treated as risky. Approval is therefore a second guard, not the only one.
 

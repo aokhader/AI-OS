@@ -1,0 +1,28 @@
+<%- include('partials/head') %>
+<br>
+<div class="ttl"><%= labels.confirmation %></div>
+<p>The sub-account has been opened.</p>
+<table cellpadding="4" cellspacing="0" border="1" class="box">
+<tr>
+<td class="lbl">Confirmation number</td>
+<td><%= confirmation.number %></td>
+</tr>
+<tr>
+<td class="lbl"><%= labels.memberNumber %></td>
+<td><%= member.id %></td>
+</tr>
+<tr>
+<td class="lbl">Account number</td>
+<td><%= confirmation.account.number %></td>
+</tr>
+<tr>
+<td class="lbl">Type</td>
+<td><%= confirmation.account.type %></td>
+</tr>
+<tr>
+<td class="lbl"><%= labels.initialDeposit %></td>
+<td><%= formatMoney(confirmation.account.balance) %></td>
+</tr>
+</table>
+<p><a href="/members/<%= member.id %>">Return to <%= labels.memberDetail %></a></p>
+<%- include('partials/foot') %>

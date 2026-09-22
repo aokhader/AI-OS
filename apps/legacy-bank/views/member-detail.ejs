@@ -1,0 +1,44 @@
+<%- include('partials/head') %>
+<br>
+<div class="ttl"><%= labels.memberDetail %></div>
+<table cellpadding="4" cellspacing="0" border="1" class="box">
+<tr>
+<td class="lbl"><%= labels.memberNumber %></td>
+<td><%= member.id %></td>
+<td class="lbl">Status</td>
+<td><%= member.status %></td>
+</tr>
+<tr>
+<td class="lbl">Name</td>
+<td><%= member.firstName %> <%= member.lastName %></td>
+<td class="lbl">Member since</td>
+<td><%= member.memberSince %></td>
+</tr>
+</table>
+<br>
+<div class="ttl"><%= labels.accounts %></div>
+<table cellpadding="4" cellspacing="0" border="1" class="box">
+<tr>
+<td class="lbl">Type</td>
+<td class="lbl">Number</td>
+<td class="lbl" align="right">Balance</td>
+<td class="lbl">Opened</td>
+</tr>
+<% for (const account of member.accounts) { %>
+<tr>
+<td><%= account.type %></td>
+<td><%= account.number %></td>
+<td align="right"><%= formatMoney(account.balance) %></td>
+<td><%= account.opened %></td>
+</tr>
+<% } %>
+</table>
+<br>
+<table cellpadding="4" cellspacing="0" border="0">
+<tr>
+<td><a href="/members/<%= member.id %>/accounts/open"><%= labels.openSubAccount %></a></td>
+<td>&nbsp;|&nbsp;</td>
+<td><a href="/members">New search</a></td>
+</tr>
+</table>
+<%- include('partials/foot') %>

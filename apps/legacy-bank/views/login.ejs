@@ -1,0 +1,26 @@
+<%- include('partials/head') %>
+<br>
+<div class="ttl"><%= labels.signIn %></div>
+<% if (expired) { %>
+<p class="err">Your session has expired. Please sign in again.</p>
+<% } %>
+<% if (error) { %>
+<p class="err"><%= error %></p>
+<% } %>
+<form method="post" action="/login">
+<table cellpadding="4" cellspacing="0" border="0" class="box">
+<tr>
+<td class="lbl"><%= labels.userId %></td>
+<td><input type="text" name="uid" size="20" maxlength="32" value="<%= uid %>"></td>
+</tr>
+<tr>
+<td class="lbl"><%= labels.password %></td>
+<td><input type="password" name="pwd" size="20" maxlength="64"></td>
+</tr>
+<tr>
+<td>&nbsp;</td>
+<td><input type="submit" value="<%= labels.signIn %>"></td>
+</tr>
+</table>
+</form>
+<%- include('partials/foot') %>

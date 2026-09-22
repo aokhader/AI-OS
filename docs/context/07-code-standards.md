@@ -6,7 +6,7 @@ Skeleton. Headings are final; each holds its intent and a `TODO` until written i
 
 ## 1. TypeScript configuration
 
-Base `tsconfig.base.json` shared by every package: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `module: NodeNext`, `target: ES2022`. Each package extends it. No `skipLibCheck` in packages we own.
+Base `tsconfig.base.json` shared by every package: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `verbatimModuleSyntax`, `module: NodeNext`, `target: ES2022`, `noEmit`. Each package extends it. `skipLibCheck` is on: third-party declaration files are not re-checked (vitest's benchmark dependency needs DOM types otherwise); our own code is fully strict. Relative imports use the `.js` extension, as Node ESM requires. The console alone uses `moduleResolution: Bundler` and `jsx: react-jsx` because Vite builds it.
 
 TODO
 

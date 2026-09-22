@@ -1,0 +1,23 @@
+{
+  "name": "@handsoff/llm-anthropic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Planner and RecoveryPlanner implementations over the Anthropic SDK.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
+    "@handsoff/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.0"
+  }
+}

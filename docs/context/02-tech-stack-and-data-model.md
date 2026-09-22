@@ -9,8 +9,8 @@ The concrete choices behind [01-architecture.md](01-architecture.md). Every type
 | Layer | Choice | Why |
 |---|---|---|
 | Runtime | Node 22 LTS, ESM, pnpm workspaces | Playwright's home; one language end to end ([D-001](08-decision-log.md#d-001--typescript-on-node-22-pnpm-monorepo)) |
-| Language | TypeScript 5.x, `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` | Errors as data needs exhaustive unions |
-| Schemas | zod 3.x + `zod-to-json-schema` | One definition for validation, types and the reviewable artifact schema |
+| Language | TypeScript 5.9, `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `skipLibCheck` (third-party declarations only) | Errors as data needs exhaustive unions |
+| Schemas | zod 4.x; `z.toJSONSchema` exports the reviewable schemas to `packages/core/schema/` | One definition for validation, types and the reviewable artifact schema |
 | Browser automation | Playwright (Chromium only), headed by default | Accessibility snapshot, frame handling, request routing for the network-level allowlist ([D-002](08-decision-log.md#d-002--perceive-via-accessibility-tree--screenshot-act-via-playwright)) |
 | LLM | `@anthropic-ai/sdk`, default model `claude-opus-5` | See [LLM integration](#llm-integration) ([D-004](08-decision-log.md#d-004--anthropic-claude-behind-a-thin-planner-interface), [D-020](08-decision-log.md#d-020--default-model-claude-opus-5-overridable)) |
 | Embedded server | Fastify 5 + `@fastify/websocket` + `@fastify/static` | Small, typed, serves the console build |
@@ -20,19 +20,21 @@ The concrete choices behind [01-architecture.md](01-architecture.md). Every type
 | CLI | commander | Standard, tiny |
 | Tests | vitest; Playwright for a few integration tests against the mock app | Classifier, resolver, gate and schema tests run on saved fixtures with no browser |
 | Lint / format | Biome | One tool, fast, no config sprawl |
-| Dev tooling | `tsx` to run TypeScript directly; `tsc -b` for builds; `concurrently` for `pnpm dev` | No bundler for Node packages |
+| Dev tooling | `tsx` runs TypeScript directly; every package exports its `src/index.ts`, so there is no build or emit step; `tsc --noEmit` per package for typechecking; Vite builds the console | Nothing in the demo runs under plain `node`; a build step is a failure mode for no benefit ([D-025](08-decision-log.md#d-025--packages-export-typescript-source-no-build-step)) |
 
 Root scripts (to be created in P0):
 
-| Script | Does |
-|---|---|
-| `pnpm dev` | Starts legacy-bank A and B, the runner in `serve` mode, and the console dev server |
-| `pnpm handsoff discover --goal "…" --param memberId=10001 --target acme-coreteller` | One discovery run |
-| `pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001` | One replay |
-| `pnpm handsoff replay … --chaos session-expiry` | Replay with an injected condition |
-| `pnpm test` | Unit tests, no browser, no API key |
-| `pnpm test:integration` | Playwright tests against the mock app, headless, no API key |
-| `pnpm evidence:copy <runId> <name>` | Copies a run folder into `/evidence/<name>/` |
+| Script | Does | Since |
+|---|---|---|
+| `pnpm dev` | Starts the mock app (P0); grows to legacy-bank A and B, the runner in `serve` mode, and the console dev server | P0 |
+| `pnpm handsoff discover --goal "…" --param memberId=10001 --target acme-coreteller` | One discovery run (`tsx apps/runner/src/cli.ts`) | P2 |
+| `pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001` | One replay | P1 |
+| `pnpm handsoff replay … --chaos session-expiry` | Replay with an injected condition | P4 |
+| `pnpm test` | Unit tests, no browser, no API key | P0 |
+| `pnpm test:integration` | Playwright tests against the mock app, headless, no API key | P1 |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format` | `tsc --noEmit` per package; Biome check; Biome format | P0 |
+| `pnpm schema:export` | Regenerates `packages/core/schema/*.schema.json` from the zod schemas | P0 |
+| `pnpm evidence:copy <runId> <name>` | Copies a run folder into `/evidence/<name>/` | P8 |
 
 ## LLM integration
 
@@ -372,8 +374,9 @@ interface AppProfile {
 }
 
 interface BootstrapRoutine {
-  entry: string;                       // login route
-  steps: Array<Omit<Step, 'bindings' | 'baseline' | 'recordedBy'> & { value?: { env: string } }>;   // credentials by env var NAME
+  entry: string;                                   // login route
+  credentials: Record<string, { env: string }>;    // param name → environment variable NAME; values never logged
+  steps: Array<Omit<Step, 'bindings' | 'baseline' | 'recordedBy'>>;   // type/select steps use { param } values bound from credentials
   success: Condition;
 }
 

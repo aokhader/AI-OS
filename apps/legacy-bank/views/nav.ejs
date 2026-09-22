@@ -1,0 +1,13 @@
+<%- include('partials/head') %>
+<br>
+<table width="100%" cellpadding="4" cellspacing="0" border="0" class="box">
+<tr><td class="lbl">Menu</td></tr>
+<tr><td><a href="/members" target="<%= mainFrameName %>"><%= labels.memberLookup %></a></td></tr>
+<tr><td><a href="/logout" target="_top"><%= labels.signOut %></a></td></tr>
+</table>
+<br>
+<table width="100%" cellpadding="4" cellspacing="0" border="0">
+<tr><td class="note"><font size="1">Teller: <%= user %></font></td></tr>
+</table>
+</body>
+</html>

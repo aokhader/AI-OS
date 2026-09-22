@@ -11,16 +11,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 | Date | Session | What landed | Next |
 |---|---|---|---|
 | 2026-09-21 | 1 | `docs/context/` created: overview, architecture, tech stack and data model, decision log; skeletons for UI, roadmap, tracker, AI rules, code standards; root `CLAUDE.md` | P0: workspace scaffold, mock app happy path, core schemas |
+| 2026-09-21 | 2 | P0 complete. pnpm workspace with six packages; Biome, vitest, base tsconfig; core zod schemas with cross-field rules and 24 tests; JSON Schema export; app profile and policy files validate; legacy-bank happy path (frameset, tables, no ids) with 11 supertest tests, variant B branding and labels included; CLI skeleton; console shell. Docs updated: D-025, stack table, bootstrap credentials, policy patterns | P1: `surface-playwright` observe / act / resolve, filesystem store, replay engine skeleton, hand-written artifact replays with zero LLM |
 
 ## Phases
 
 ### P0 · Foundations
-- [x] `docs/context/` written (this session)
-- [ ] pnpm workspace with six packages stubbed and building
-- [ ] Biome, vitest, base tsconfig
-- [ ] `legacy-bank` variant A happy path with framesets and tables
-- [ ] zod schemas: `Condition`, `TargetSpec`, `Capability`, `ReplayResult`, `AppProfile`, `Policy`
-- [ ] Example artifact validates against `CapabilitySchema`
+- [x] `docs/context/` written (session 1)
+- [x] pnpm workspace with six packages stubbed and building (`pnpm typecheck` clean across all six)
+- [x] Biome, vitest, base tsconfig (`pnpm lint`, `pnpm test`, `pnpm format`)
+- [x] `legacy-bank` variant A happy path with framesets and tables (11 supertest tests; boots on `:4100`)
+- [x] zod schemas: `Condition`, `TargetSpec`, `Capability`, `ReplayResult`, `AppProfile`, `Policy` (plus `Run`, `RunEvent`, `Escalation`, `Observation`)
+- [x] Example artifact validates against `CapabilitySchema`; `data/app-profiles/acme-coreteller.json` and `config/policy.json` validate too
 
 ### P1 · Surface and hand-written replay
 - [ ] `observe()` with refs, frame paths, screenshot, dialogs, digest
@@ -71,7 +72,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 - [ ] `evidence/replay-escalation-handoff/`
 
 ### P7 · Cross-tenant variant, stretch
-- [ ] Variant B on `:4101`
+- [~] Variant B on `:4101` (branding, labels and frame name done in P0 via `LEGACY_BANK_VARIANT=b`; column reorder pending)
 - [ ] Fingerprints, profile-level and capability-level overrides
 - [ ] `DRIFT_SUSPECTED` on unknown fingerprint
 - [ ] `evidence/replay-variant-b/`

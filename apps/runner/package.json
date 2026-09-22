@@ -1,0 +1,24 @@
+{
+  "name": "@handsoff/runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The `handsoff` CLI: discover, replay, serve. Owns the browser session and embeds the API and console.",
+  "type": "module",
+  "bin": {
+    "handsoff": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@handsoff/core": "workspace:*",
+    "@handsoff/llm-anthropic": "workspace:*",
+    "@handsoff/surface-playwright": "workspace:*",
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@handsoff/legacy-bank",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock legacy credit-union core app (ACME CoreTeller): server-rendered, framesets, table layouts, no ids. The automation target. Shares nothing with the rest of the workspace.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "cookie-session": "^2.1.1",
+    "ejs": "^3.1.10",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/cookie-session": "^2.0.49",
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.19.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "^7.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.1"
+  }
+}

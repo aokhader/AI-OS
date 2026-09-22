@@ -1,0 +1,25 @@
+<%- include('partials/head') %>
+<br>
+<div class="ttl"><%= labels.searchResults %></div>
+<% if (member) { %>
+<table cellpadding="4" cellspacing="0" border="1" class="box">
+<tr>
+<td class="lbl"><%= labels.memberNumber %></td>
+<td class="lbl">Name</td>
+<td class="lbl">Status</td>
+<td class="lbl"><%= labels.actionColumn %></td>
+</tr>
+<tr>
+<td><%= member.id %></td>
+<td><%= member.firstName %> <%= member.lastName %></td>
+<td><%= member.status %></td>
+<td><a href="/members/<%= member.id %>"><%= labels.view %></a></td>
+</tr>
+</table>
+<% } else { %>
+<table cellpadding="4" cellspacing="0" border="1" class="box">
+<tr><td class="err">No matching member for number <%= mno %>.</td></tr>
+</table>
+<% } %>
+<p><a href="/members">New search</a></p>
+<%- include('partials/foot') %>

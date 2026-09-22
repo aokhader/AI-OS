@@ -1,0 +1,22 @@
+# dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# runtime data: runs, compiled capabilities and escalations are generated;
+# app profiles are hand-written and committed
+data/runs/
+data/capabilities/
+data/escalations/
+
+# tooling
+*.log
+.DS_Store
+Thumbs.db
+playwright-report/
+test-results/

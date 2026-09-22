@@ -1,0 +1,17 @@
+<%- include('partials/head') %>
+<br>
+<div class="ttl"><%= labels.memberLookup %></div>
+<form method="post" action="/members/search">
+<table cellpadding="4" cellspacing="0" border="1" class="box">
+<tr>
+<td class="lbl" colspan="3">Find a member by number</td>
+</tr>
+<tr>
+<td class="lbl"><%= labels.memberNumber %></td>
+<td><input type="text" name="mno" size="12" maxlength="12" value="<%= mno %>"></td>
+<td><input type="submit" value="<%= labels.search %>"></td>
+</tr>
+</table>
+</form>
+<p class="note"><font size="1">Enter the member number exactly as printed on the member card.</font></p>
+<%- include('partials/foot') %>

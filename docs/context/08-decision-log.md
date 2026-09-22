@@ -38,6 +38,7 @@ Rules:
 | D-022 | Manual tool-use loop on SDK types, not the beta tool runner | accepted |
 | D-023 | `core` has no runtime dependencies; LLM adapter is a separate package | accepted |
 | D-024 | Chaos modes: four required, two optional | accepted |
+| D-025 | Packages export TypeScript source; no build step | accepted |
 
 ---
 
@@ -256,3 +257,12 @@ Date: 2026-09-21 · Status: accepted
 - **Alternatives.** All seven modes named in brief §3.3 including permission denied.
 - **Why.** The four cover each condition class in D-014 (outcome, outcome, recover by bootstrap, recover by dismiss) and are enough to prove the taxonomy. The rest add breadth, not depth.
 - **Consequences.** Permission denied is handled as a business outcome by the same detector mechanism but may not have a dedicated chaos switch.
+
+## D-025 · Packages export TypeScript source; no build step
+
+Date: 2026-09-21 · Status: accepted
+
+- **Decision.** Every workspace package's `main`, `types` and `exports` point at `src/index.ts`. `tsx` runs the CLI and the mock app, vitest imports source directly, `tsc --noEmit` per package is the typecheck, and Vite builds the console. There is no emit step anywhere. `pnpm handsoff` is `tsx apps/runner/src/cli.ts`.
+- **Alternatives.** `tsc -b` with project references emitting `dist/` and conditional exports so tests can still hit source.
+- **Why.** Nothing in the demo runs under plain `node`. A build step adds a "did you build?" failure mode and a second module-resolution story for no reviewer benefit, and the brief grades "easy to run" (§7).
+- **Consequences.** Publishing these packages would need a build; not a goal. zod 4's built-in `z.toJSONSchema` replaces the `zod-to-json-schema` dependency named in the first draft of the tech stack doc. `skipLibCheck` is on so third-party declarations are not re-checked.

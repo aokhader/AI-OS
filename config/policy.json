@@ -1,0 +1,23 @@
+{
+  "allowedOrigins": ["http://localhost:4100", "http://localhost:4101"],
+  "allowedRoutes": ["/", "/login", "/logout", "/nav", "/members", "/members/**"],
+  "deniedRoutes": ["/admin/**"],
+  "allowedActions": ["click", "type", "select", "press", "navigate", "wait", "extract"],
+  "riskyPatterns": {
+    "buttonText": [
+      "submit",
+      "confirm",
+      "post",
+      "transfer",
+      "delete",
+      "close account",
+      "open account"
+    ],
+    "formAction": ["/members/*/accounts/open"],
+    "routes": ["/members/*/accounts/*/close"]
+  },
+  "riskyMode": { "discovery": "escalate", "replay": "require_approved" },
+  "escalationTimeoutMs": 600000,
+  "budgets": { "recoveriesPerStep": 2, "rebootstrapsPerRun": 1 },
+  "assistedFallback": { "enabled": false, "maxPerRun": 2 }
+}

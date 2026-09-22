@@ -1,0 +1,298 @@
+{
+  "schemaVersion": 1,
+  "id": "get-member-savings-balance",
+  "name": "Get member savings balance",
+  "description": "Looks up a member by member number and returns the current balance of their Savings share account.",
+  "version": 1,
+  "status": "draft",
+  "provenance": {
+    "runId": "run_20260924_143012_a1b2",
+    "model": "claude-opus-5",
+    "effort": "high",
+    "recordedAt": "2026-09-24T14:32:40Z",
+    "variantId": "first-example-cu",
+    "compiler": "handsoff@0.1.0"
+  },
+  "app": { "vendorProductId": "acme-coreteller", "surfaceKind": "legacy-web" },
+  "entry": {
+    "route": "/members",
+    "requiresAuth": true,
+    "preconditions": [
+      {
+        "id": "entry-member-lookup",
+        "role": "precondition",
+        "when": { "textPresent": ["Member Lookup"], "timeoutMs": 10000 }
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "memberId",
+      "type": "string",
+      "description": "Member number as printed on the member card",
+      "sensitivity": "sensitive",
+      "required": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "savingsBalance",
+      "type": "number",
+      "parser": "currency",
+      "description": "Current balance of the Savings share account",
+      "source": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Savings",
+            "relation": "same-row-column",
+            "column": "Balance"
+          }
+        ],
+        "framePath": ["main"]
+      },
+      "atStep": "s4",
+      "required": true,
+      "sensitivity": "sensitive"
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "intent": "Enter the member number into the lookup field",
+      "action": {
+        "kind": "type",
+        "target": {
+          "spec": {
+            "strategies": [
+              { "kind": "anchored", "anchor": "Member #", "relation": "labels", "role": "textbox" },
+              { "kind": "role", "role": "textbox", "name": "Member #" },
+              { "kind": "structural", "path": "table[1] > tr[2] > td[2] > input[1]" }
+            ],
+            "framePath": ["main"]
+          }
+        },
+        "value": { "param": "memberId" },
+        "clear": true
+      },
+      "target": {
+        "strategies": [
+          { "kind": "anchored", "anchor": "Member #", "relation": "labels", "role": "textbox" },
+          { "kind": "role", "role": "textbox", "name": "Member #" },
+          { "kind": "structural", "path": "table[1] > tr[2] > td[2] > input[1]" }
+        ],
+        "framePath": ["main"]
+      },
+      "bindings": [{ "param": "memberId", "field": "value", "inferred": false }],
+      "preconditions": [],
+      "postcondition": {
+        "id": "s1-post",
+        "role": "postcondition",
+        "when": {
+          "element": {
+            "strategies": [
+              { "kind": "anchored", "anchor": "Member #", "relation": "labels", "role": "textbox" }
+            ],
+            "framePath": ["main"]
+          },
+          "timeoutMs": 5000
+        }
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "baseline": { "resolvedBy": 0, "candidateCount": 1 },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s2",
+      "intent": "Run the lookup",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              { "kind": "role", "role": "button", "name": "Search" },
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "right-of",
+                "role": "button"
+              },
+              { "kind": "structural", "path": "table[1] > tr[2] > td[3] > input[1]" }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          { "kind": "role", "role": "button", "name": "Search" },
+          { "kind": "anchored", "anchor": "Member #", "relation": "right-of", "role": "button" },
+          { "kind": "structural", "path": "table[1] > tr[2] > td[3] > input[1]" }
+        ],
+        "framePath": ["main"]
+      },
+      "bindings": [],
+      "preconditions": [],
+      "postcondition": {
+        "id": "s2-post",
+        "role": "postcondition",
+        "when": { "textPresent": ["Search Results"], "timeoutMs": 10000 }
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "baseline": { "resolvedBy": 0, "candidateCount": 1 },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s3",
+      "intent": "Open the matching member's detail page",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              { "kind": "role", "role": "link", "name": "View" },
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "same-row-column",
+                "column": "Action",
+                "role": "link"
+              },
+              { "kind": "structural", "path": "table[2] > tr[2] > td[4] > a[1]" }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          { "kind": "role", "role": "link", "name": "View" },
+          {
+            "kind": "anchored",
+            "anchor": "Member #",
+            "relation": "same-row-column",
+            "column": "Action",
+            "role": "link"
+          },
+          { "kind": "structural", "path": "table[2] > tr[2] > td[4] > a[1]" }
+        ],
+        "framePath": ["main"]
+      },
+      "bindings": [{ "param": "memberId", "field": "postcondition.url", "inferred": true }],
+      "preconditions": [],
+      "postcondition": {
+        "id": "s3-post",
+        "role": "postcondition",
+        "when": {
+          "url": "/members/:memberId",
+          "textPresent": ["Member Detail"],
+          "timeoutMs": 10000
+        }
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "baseline": { "resolvedBy": 0, "candidateCount": 1 },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s4",
+      "intent": "Read the Savings balance from the accounts table",
+      "action": {
+        "kind": "extract",
+        "name": "savingsBalance",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Savings",
+                "relation": "same-row-column",
+                "column": "Balance"
+              },
+              { "kind": "structural", "path": "table[3] > tr[2] > td[3]" }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Savings",
+            "relation": "same-row-column",
+            "column": "Balance"
+          },
+          { "kind": "structural", "path": "table[3] > tr[2] > td[3]" }
+        ],
+        "framePath": ["main"]
+      },
+      "bindings": [],
+      "preconditions": [
+        { "id": "s4-pre", "role": "precondition", "when": { "textPresent": ["Accounts"] } }
+      ],
+      "postcondition": {
+        "id": "s4-post",
+        "role": "postcondition",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Savings",
+                "relation": "same-row-column",
+                "column": "Balance"
+              }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "baseline": { "resolvedBy": 0, "candidateCount": 1 },
+      "recordedBy": "automation"
+    }
+  ],
+  "success": {
+    "id": "success",
+    "role": "postcondition",
+    "when": { "url": "/members/:memberId", "textPresent": ["Member Detail", "Savings"] }
+  },
+  "detectors": [
+    {
+      "id": "member-not-found",
+      "role": "detector",
+      "class": "outcome",
+      "code": "MEMBER_NOT_FOUND",
+      "message": "No member matches the supplied member number",
+      "when": { "textPresent": ["No matching member"] },
+      "atSteps": ["s2"],
+      "terminal": true
+    }
+  ],
+  "policy": { "requiredScopes": ["members:read"], "riskySteps": [] },
+  "variants": {
+    "sample-federal-cu": {
+      "steps": {
+        "s3": {
+          "target": {
+            "strategies": [
+              { "kind": "role", "role": "link", "name": "Open" },
+              {
+                "kind": "anchored",
+                "anchor": "Member Number",
+                "relation": "same-row-column",
+                "column": "Actions",
+                "role": "link"
+              }
+            ],
+            "framePath": ["content"]
+          }
+        }
+      }
+    }
+  }
+}

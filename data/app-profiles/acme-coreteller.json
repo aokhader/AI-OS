@@ -1,0 +1,186 @@
+{
+  "vendorProductId": "acme-coreteller",
+  "name": "ACME CoreTeller",
+  "surfaceKind": "legacy-web",
+  "bootstrap": {
+    "entry": "/login",
+    "credentials": {
+      "username": { "env": "LEGACY_BANK_USER" },
+      "password": { "env": "LEGACY_BANK_PASS" }
+    },
+    "steps": [
+      {
+        "id": "b1",
+        "intent": "Enter the teller user id",
+        "action": {
+          "kind": "type",
+          "target": {
+            "spec": {
+              "strategies": [
+                { "kind": "anchored", "anchor": "User ID", "relation": "labels", "role": "textbox" }
+              ],
+              "framePath": []
+            }
+          },
+          "value": { "param": "username" },
+          "clear": true
+        },
+        "target": {
+          "strategies": [
+            { "kind": "anchored", "anchor": "User ID", "relation": "labels", "role": "textbox" }
+          ],
+          "framePath": []
+        },
+        "preconditions": [],
+        "postcondition": {
+          "id": "b1-post",
+          "role": "postcondition",
+          "when": {
+            "element": {
+              "strategies": [
+                { "kind": "anchored", "anchor": "User ID", "relation": "labels", "role": "textbox" }
+              ],
+              "framePath": []
+            }
+          }
+        },
+        "risk": "safe",
+        "confirm": "none"
+      },
+      {
+        "id": "b2",
+        "intent": "Enter the teller password",
+        "action": {
+          "kind": "type",
+          "target": {
+            "spec": {
+              "strategies": [
+                {
+                  "kind": "anchored",
+                  "anchor": "Password",
+                  "relation": "labels",
+                  "role": "textbox"
+                }
+              ],
+              "framePath": []
+            }
+          },
+          "value": { "param": "password" },
+          "clear": true
+        },
+        "target": {
+          "strategies": [
+            { "kind": "anchored", "anchor": "Password", "relation": "labels", "role": "textbox" }
+          ],
+          "framePath": []
+        },
+        "preconditions": [],
+        "postcondition": {
+          "id": "b2-post",
+          "role": "postcondition",
+          "when": {
+            "element": {
+              "strategies": [
+                {
+                  "kind": "anchored",
+                  "anchor": "Password",
+                  "relation": "labels",
+                  "role": "textbox"
+                }
+              ],
+              "framePath": []
+            }
+          }
+        },
+        "risk": "safe",
+        "confirm": "none"
+      },
+      {
+        "id": "b3",
+        "intent": "Sign in",
+        "action": {
+          "kind": "click",
+          "target": {
+            "spec": {
+              "strategies": [{ "kind": "role", "role": "button", "name": "Sign In" }],
+              "framePath": []
+            }
+          }
+        },
+        "target": {
+          "strategies": [{ "kind": "role", "role": "button", "name": "Sign In" }],
+          "framePath": []
+        },
+        "preconditions": [],
+        "postcondition": {
+          "id": "b3-post",
+          "role": "postcondition",
+          "when": { "textPresent": ["Member Lookup"], "timeoutMs": 10000 }
+        },
+        "risk": "safe",
+        "confirm": "none"
+      }
+    ],
+    "success": {
+      "id": "bootstrap-success",
+      "role": "postcondition",
+      "when": { "textPresent": ["Member Lookup"] }
+    }
+  },
+  "detectors": [
+    {
+      "id": "session-expired",
+      "role": "detector",
+      "class": "recover",
+      "code": "SESSION_EXPIRED",
+      "message": "The session expired and the sign-in page is showing",
+      "when": { "textPresent": ["Your session has expired"] },
+      "recovery": { "kind": "rebootstrap" }
+    },
+    {
+      "id": "system-notice",
+      "role": "detector",
+      "class": "recover",
+      "code": "INTERSTITIAL",
+      "message": "A system notice dialog is covering the page",
+      "when": { "dialog": true, "textPresent": ["System notice"] },
+      "recovery": {
+        "kind": "dismiss",
+        "target": {
+          "strategies": [{ "kind": "role", "role": "button", "name": "OK" }],
+          "framePath": []
+        }
+      }
+    },
+    {
+      "id": "app-error",
+      "role": "detector",
+      "class": "fail",
+      "code": "APP_ERROR",
+      "message": "The application returned an error page",
+      "when": { "textPresent": ["Application error"] }
+    },
+    {
+      "id": "permission-denied",
+      "role": "detector",
+      "class": "outcome",
+      "code": "PERMISSION_DENIED",
+      "message": "The signed-in user is not permitted to perform this action",
+      "when": { "textPresent": ["not authorized"] }
+    }
+  ],
+  "variants": {
+    "first-example-cu": {
+      "name": "First Example Credit Union",
+      "fingerprint": { "titleIncludes": "First Example Credit Union" },
+      "overrides": {}
+    },
+    "sample-federal-cu": {
+      "name": "Sample Federal Credit Union",
+      "fingerprint": { "titleIncludes": "Sample Federal Credit Union" },
+      "overrides": {
+        "labels": { "Member #": "Member Number", "Search": "Find", "View": "Open" }
+      }
+    }
+  }
+}

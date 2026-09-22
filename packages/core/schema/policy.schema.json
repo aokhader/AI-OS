@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HandsOff policy",
+  "description": "Generated from packages/core by `pnpm schema:export`. Cross-field rules (step ids, bindings, condition roles, risky steps) are checked by the zod schema, not by this JSON Schema.",
+  "type": "object",
+  "properties": {
+    "allowedOrigins": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "allowedRoutes": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema1"
+      }
+    },
+    "deniedRoutes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "starts_with",
+        "pattern": "^\\/.*"
+      }
+    },
+    "allowedActions": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema2"
+      }
+    },
+    "riskyPatterns": {
+      "type": "object",
+      "properties": {
+        "buttonText": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "formAction": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "buttonText",
+        "formAction",
+        "routes"
+      ],
+      "additionalProperties": false
+    },
+    "riskyMode": {
+      "type": "object",
+      "properties": {
+        "discovery": {
+          "type": "string",
+          "enum": [
+            "escalate",
+            "block"
+          ]
+        },
+        "replay": {
+          "type": "string",
+          "const": "require_approved"
+        }
+      },
+      "required": [
+        "discovery",
+        "replay"
+      ],
+      "additionalProperties": false
+    },
+    "escalationTimeoutMs": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "recoveriesPerStep": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rebootstrapsPerRun": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "recoveriesPerStep",
+        "rebootstrapsPerRun"
+      ],
+      "additionalProperties": false
+    },
+    "assistedFallback": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxPerRun": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "enabled",
+        "maxPerRun"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "allowedOrigins",
+    "allowedRoutes",
+    "deniedRoutes",
+    "allowedActions",
+    "riskyPatterns",
+    "riskyMode",
+    "escalationTimeoutMs",
+    "budgets",
+    "assistedFallback"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "type": "string",
+      "format": "uri"
+    },
+    "__schema1": {
+      "type": "string",
+      "format": "starts_with",
+      "pattern": "^\\/.*"
+    },
+    "__schema2": {
+      "type": "string",
+      "enum": [
+        "click",
+        "type",
+        "select",
+        "press",
+        "navigate",
+        "wait",
+        "extract"
+      ]
+    }
+  }
+}
