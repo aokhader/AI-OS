@@ -25,7 +25,7 @@ Days are focused sessions, not calendar days. Progress against this plan is trac
 ### P2 · Discovery (day 3)
 
 - Goal: one real LLM-driven run against the mock app, saved to `/evidence/` immediately.
-- Work: `llm-anthropic` planner with strict tools and `{ param }` values; discovery engine loop, stop conditions, stuck detector; redaction of params in observation and transcript; `ScriptedPlanner` for tests.
+- Work: planner adapters (`llm-anthropic`, `llm-openai` for Google AI Studio and other OpenAI-compatible endpoints) over the planner protocol in core, with strict tools and `{ param }` values; discovery engine loop, stop conditions, stuck detector; redaction of params in observation and transcript; `ScriptedPlanner` for tests.
 - Exit: `handsoff discover --goal "..." --param memberId=10001` completes the balance lookup; `evidence/discovery-run/` exists.
 - Brief: §3.1, §4 (the non-negotiable real run).
 

@@ -1,6 +1,6 @@
 # 08 · Decision Log
 
-Status: stable · Last updated: 2026-09-21
+Status: stable · Last updated: 2026-09-22
 
 Lightweight architecture decision records. One entry per decision that shapes the system. The brief (§4, §5, §7) says every decision must be defended; this log is where the defence lives, and `/REPORT.md` will be distilled from it.
 
@@ -17,7 +17,7 @@ Rules:
 | D-001 | TypeScript on Node 22, pnpm monorepo | accepted |
 | D-002 | Perceive via accessibility tree + screenshot; act via Playwright | accepted |
 | D-003 | Target is a locally built mock legacy bank app with a second variant | accepted |
-| D-004 | Anthropic Claude behind a thin `Planner` interface | accepted |
+| D-004 | Anthropic Claude behind a thin `Planner` interface | accepted, extended by D-031 |
 | D-005 | Web-only operator console (Vite + React); no mobile | accepted |
 | D-006 | Filesystem-only storage | accepted |
 | D-007 | Two-week time box | accepted |
@@ -41,6 +41,10 @@ Rules:
 | D-025 | Packages export TypeScript source; no build step | accepted |
 | D-026 | Target resolution is a pure function in core; surfaces act on refs | accepted |
 | D-027 | An in-page walker instead of the browser's accessibility snapshot | accepted |
+| D-028 | Flat parameter tools instead of a Value union in the model-facing schemas | accepted |
+| D-029 | Discovered outputs default to sensitive; anchors never contain parameter values | accepted |
+| D-030 | Planner protocol in core, adapters translate wire formats only | accepted |
+| D-031 | Provider-selectable discovery with an OpenAI-compatible adapter | accepted |
 
 ---
 
@@ -73,7 +77,7 @@ Date: 2026-09-21 · Status: accepted
 
 ## D-004 · Anthropic Claude behind a thin `Planner` interface
 
-Date: 2026-09-21 · Status: accepted
+Date: 2026-09-21 · Status: accepted, extended by D-031
 
 - **Decision.** `@anthropic-ai/sdk` with tool use. `packages/llm-anthropic` implements `Planner` and `RecoveryPlanner` from `core`. A `ScriptedPlanner` in core serves tests and the offline path.
 - **Alternatives.** OpenAI. Two providers behind a switch from day one.
@@ -286,3 +290,39 @@ Date: 2026-09-21 · Status: accepted
 - **Alternatives.** Playwright's `page.accessibility.snapshot()` (deprecated; no refs, boxes or frames). `locator.ariaSnapshot()` (YAML; no boxes or structural paths). The CDP `Accessibility.getFullAXTree` (the real tree, but mapping nodes back to actable elements across frames is awkward).
 - **Why.** Replay needs refs it can act on, page-level boxes for masking and geometric anchoring, per-frame paths for framesets, and structural paths for the third strategy. Legacy markup also needs name rules the browser does not apply, such as treating a table cell as the label of the control beside it.
 - **Consequences.** About 250 lines of browser code we own; roles are HTML-semantic approximations, not the browser's computed roles. The walker is shipped to the page as source text with a shim for the helper esbuild injects under tsx, because Playwright does not invoke a string expression that evaluates to a function.
+
+## D-028 · Flat parameter tools instead of a Value union in the model-facing schemas
+
+Date: 2026-09-21 · Status: accepted
+
+- **Decision.** The model sees eleven flat tools. Entering a parameter is its own tool (`type_param`, `select_param`) that takes the parameter name; literal input is `type_text` / `select_option`. The planner maps each call onto the core `Action` union, whose `Value` is still `{ text } | { param }`.
+- **Alternatives.** One `type` tool whose `value` is a `{ text } | { param }` union, mirroring the core schema.
+- **Why.** Strict tool schemas need `additionalProperties: false` and a plain `required` list; unions of objects are where strict mode and JSON Schema generation get fragile. Separate tools also make the "never type a parameter value" rule a matter of choosing a tool rather than choosing a shape, which models follow more reliably.
+- **Consequences.** A small mapping layer in `@handsoff/llm-anthropic`; the core `Decision` type is unchanged.
+
+## D-029 · Discovered outputs default to sensitive; anchors never contain parameter values
+
+Date: 2026-09-21 · Status: accepted
+
+- **Decision.** Every output a discovery compiles is marked `sensitivity: sensitive` unless the caller says otherwise, and target derivation refuses to use a role name or anchor text that contains any parameter value or that looks like data (money, dates, ids). Step postconditions and entry preconditions apply the same rule to the texts they check.
+- **Alternatives.** Default outputs to `internal`. Let the compiler use whatever text uniquely identifies an element, including the recorded member number.
+- **Why.** This is regulated financial data; the conservative default costs nothing and a reviewer can downgrade. An artifact that embeds the value it was recorded with both leaks that value and breaks on the next invocation.
+- **Consequences.** A `View` link in a results row is anchored by the row's status text or by role and name rather than by the member number; the integration test asserts that the recorded value appears nowhere in the artifact, the event log or the transcript.
+
+## D-030 · Planner protocol in core, adapters translate wire formats only
+
+Date: 2026-09-22 · Status: accepted
+
+- **Decision.** The tool schemas with their descriptions and JSON Schema export, the system prompt, the observation and turn rendering, `parseToolCall` and the retry constants move from `@handsoff/llm-anthropic` into `packages/core/src/planners/protocol.ts`. A provider package maps the specs onto its SDK's tool type and messages, handles that API's stop reasons, and nothing else. `PlannerInfo` and `Capability.provenance` gain an optional `provider`.
+- **Alternatives.** Keep the protocol in the Anthropic package and have other adapters import it from there. Duplicate it per adapter.
+- **Why.** The protocol is what the engine relies on, not a property of one vendor: it fixes that parameters are referenced by name, that outputs are refs and that a decision is exactly one call. Core already owns `Decision`; owning the schemas that produce it keeps a change in one place and makes the Anthropic and OpenAI-compatible planners agree by construction. It is pure zod and strings, so [D-023](#d-023--core-has-no-runtime-dependencies-llm-adapter-is-a-separate-package) holds.
+- **Consequences.** Core exports model-facing text. The Anthropic package shrinks to a tool mapping and its loop. A new provider is one file plus a preset.
+
+## D-031 · Provider-selectable discovery with an OpenAI-compatible adapter
+
+Date: 2026-09-22 · Status: accepted
+
+- **Decision.** A second planner, `@handsoff/llm-openai`, speaks the OpenAI chat completions protocol over the `openai` SDK with a configurable `baseURL`, and ships presets for Google AI Studio, OpenAI, Groq, OpenRouter, Ollama and any custom endpoint. `handsoff discover` chooses the provider from `--provider`, then `HANDSOFF_LLM_PROVIDER`, then whichever key is present. The Anthropic adapter stays the reference implementation and [D-020](#d-020--default-model-claude-opus-5-overridable)'s default stands for it; each preset names its own default model where one is safe to assume (`gemini-3.8-flash` for Google, per Google's current model list) and requires `HANDSOFF_MODEL` otherwise.
+- **Alternatives.** A native Gemini adapter over `@google/genai`. One adapter per vendor. A third-party abstraction layer over many providers.
+- **Why.** The developer has no Anthropic API credit and the brief's one real run must happen; Google AI Studio's free tier is the cheapest way to get it. The chat completions protocol is what most hosted and local endpoints implement, so one adapter with presets covers them all, and Google documents function calling, image input and `reasoning_effort` on its compatible endpoint. An abstraction library would hide exactly the stop-reason and tool-call handling the design makes explicit ([D-022](#d-022--manual-tool-use-loop-on-sdk-types-not-the-beta-tool-runner)).
+- **Consequences.** Tools are not `strict` on the compatible adapter; the zod validation on the way back is the check. Screenshots travel in a user message after the tool result because tool messages cannot carry images. Presets default images and effort off for endpoints that often reject them, and the planner drops either on a 400 that names it. Provenance records which provider served a run, so evidence from a Gemini run is labelled as such. [D-004](#d-004--anthropic-claude-behind-a-thin-planner-interface) is extended, not reversed.

@@ -178,6 +178,8 @@ export type BootstrapStep = z.infer<typeof BootstrapStepSchema>;
 
 export const ProvenanceSchema = z.strictObject({
   runId: z.string().min(1),
+  /** Adapter and endpoint that served the discovery run, e.g. `anthropic`, `google`. */
+  provider: z.string().min(1).optional(),
   /** Model that served the discovery run. */
   model: z.string().min(1),
   effort: z.string().optional(),

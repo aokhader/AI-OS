@@ -1,13 +1,13 @@
 # 01 · Architecture
 
-Status: stable · Last updated: 2026-09-21
+Status: stable · Last updated: 2026-09-22
 
 This is the load-bearing document. It describes how HandsOff is put together, where the seams are, and why. Every section that makes a choice links to its entry in [08-decision-log.md](08-decision-log.md). Schemas are sketched here and defined in full in [02-tech-stack-and-data-model.md](02-tech-stack-and-data-model.md).
 
 ## 1. Principles
 
 1. **The model is in the loop only at discovery.** Replay is deterministic. The single exception is the optional, bounded assisted-fallback step (§15), and the dependency graph makes any other model call impossible ([D-023](08-decision-log.md#d-023--core-has-no-runtime-dependencies-llm-adapter-is-a-separate-package)).
-2. **Every seam is an interface in `@handsoff/core`.** Surface, planner, store, policy gate and redactor are ports. Runtime-specific code (Playwright, the Anthropic SDK, the filesystem) lives in adapter packages.
+2. **Every seam is an interface in `@handsoff/core`.** Surface, planner, store, policy gate and redactor are ports. Runtime-specific code (Playwright, the model SDKs, the filesystem) lives in adapter packages.
 3. **Errors are data across seams.** Engines return discriminated unions. Exceptions mean bugs, not business conditions.
 4. **Evidence is a by-product of the normal path.** Every observation, decision, policy verdict, action and condition is an event in the run log. Nothing is added "for debugging" later.
 5. **Thin-but-real for every brief requirement; design for scale, do not build it.** Where we stop, there is a named interface and a paragraph on what the real-scale version looks like.
@@ -23,13 +23,13 @@ flowchart LR
         STORE[("Filesystem store: data/")]
         API["Fastify REST + WebSocket"]
         SURF["surface-playwright"]
-        LLM["llm-anthropic"]
+        LLM["llm-anthropic / llm-openai"]
     end
     CONSOLE["operator-console (Vite + React)"]
     BROWSER["Chromium, headed"]
     APPA["legacy-bank variant A :4100"]
     APPB["legacy-bank variant B :4101"]
-    CLAUDE[("Anthropic API")]
+    CLAUDE[("Model API: Anthropic, Google AI Studio, any OpenAI-compatible endpoint")]
     OPERATOR(("Operator"))
 
     CLI --> ENG
@@ -64,16 +64,17 @@ At real scale: a **session broker** owns browser contexts and exposes them to st
 
 | Path | Package | Contains | May depend on |
 |---|---|---|---|
-| `packages/core` | `@handsoff/core` | Schemas (zod), domain types, discovery engine, compile, replay engine, classifier, policy gate, redactor, evidence recorder, control-owner state machine, `ScriptedPlanner`, filesystem `Store` | zod, Node built-ins only |
+| `packages/core` | `@handsoff/core` | Schemas (zod), domain types, discovery engine, compile, replay engine, classifier, policy gate, redactor, evidence recorder, control-owner state machine, the planner protocol (tool schemas, prompt, rendering), `ScriptedPlanner`, filesystem `Store` | zod, Node built-ins only |
 | `packages/surface-playwright` | `@handsoff/surface-playwright` | `Surface` implementation: observe, act, resolve, human-action capture, frame walking | core, playwright |
-| `packages/llm-anthropic` | `@handsoff/llm-anthropic` | `Planner` and `RecoveryPlanner` implementations, prompt construction, tool schemas | core, `@anthropic-ai/sdk` |
-| `apps/runner` | `@handsoff/runner` | Binary `handsoff`; wires adapters into engines; embedded Fastify API and WebSocket; serves the console build | core, surface-playwright, llm-anthropic, fastify |
+| `packages/llm-anthropic` | `@handsoff/llm-anthropic` | `Planner` over the Anthropic Messages API: strict tools, adaptive thinking, prompt caching, server-side fallbacks | core, `@anthropic-ai/sdk` |
+| `packages/llm-openai` | `@handsoff/llm-openai` | `Planner` over the OpenAI chat-completions protocol with presets for Google AI Studio, OpenAI, Groq, OpenRouter, Ollama and custom endpoints ([D-031](08-decision-log.md#d-031--provider-selectable-discovery-with-an-openai-compatible-adapter)) | core, `openai` |
+| `apps/runner` | `@handsoff/runner` | Binary `handsoff`; wires adapters into engines and picks the planner provider; embedded Fastify API and WebSocket; serves the console build | core, surface-playwright, llm-anthropic, llm-openai, fastify |
 | `apps/operator-console` | `@handsoff/operator-console` | Vite + React console | core (types only) |
 | `apps/legacy-bank` | `@handsoff/legacy-bank` | Express + EJS mock target, chaos injection, variant B | nothing from the workspace |
 
 Rules:
 
-- `core` imports **nothing** runtime-specific. No Playwright, no Anthropic SDK, no Fastify ([D-023](08-decision-log.md#d-023--core-has-no-runtime-dependencies-llm-adapter-is-a-separate-package)).
+- `core` imports **nothing** runtime-specific. No Playwright, no model SDK, no Fastify ([D-023](08-decision-log.md#d-023--core-has-no-runtime-dependencies-llm-adapter-is-a-separate-package)).
 - The replay engine in `core` takes an optional `RecoveryPlanner`. If none is injected, replay has no path to a model at all.
 - `legacy-bank` shares nothing with the rest of the workspace. It stands in for software we do not own.
 - The console imports types from `core` and nothing else; all data comes over the API.
@@ -222,12 +223,12 @@ flowchart TD
 
 1. **Bootstrap.** The runner launches the browser, runs the app profile's bootstrap routine (login using credentials from the environment; the routine is part of the profile, never of a capability), and opens the entry route. The variant is fingerprinted here.
 2. **Planner context.** Each turn the model receives: the goal; the parameter list as `{ name, type, description }` **without values**; the redacted observation as a compact text rendering of the accessibility nodes (`[e12] button "Search"`) plus the masked screenshot; a summary of steps taken so far; and the remaining step budget.
-3. **Decision.** The planner returns one tool call, or one of `finish`, `give_up`, `request_human`. The tool schemas are the `Action` union above with `Value = { text } | { param }`. Whenever the model wants to use a parameter it writes `{ param: "memberId" }`; the surface substitutes the real value at act time. This is the whole parameterisation story ([D-013](08-decision-log.md#d-013--parameters-bound-by-provenance-not-by-value-matching)): the binding is recorded at the moment the value is used, and sensitive values never enter the transcript.
+3. **Decision.** The planner returns one tool call, or one of `finish`, `give_up`, `request_human`. The model sees eleven flat tools, one per action, so every schema can be strict: `click`, `type_text`, `type_param`, `select_option`, `select_param`, `press_key`, `navigate`, `wait`, `finish`, `give_up`, `request_human` ([D-028](08-decision-log.md#d-028--flat-parameter-tools-instead-of-a-value-union-in-the-model-facing-schemas)). The tool schemas, the prompt and the observation rendering are the planner protocol in core; provider packages only translate them into their wire format ([D-030](08-decision-log.md#d-030--planner-protocol-in-core-adapters-translate-wire-formats-only)). The `*_param` tools take a parameter **name**, which the planner maps onto the core `Value = { param }`; the surface substitutes the real value at act time. This is the whole parameterisation story ([D-013](08-decision-log.md#d-013--parameters-bound-by-provenance-not-by-value-matching)): the binding is recorded at the moment the value is used, and sensitive values never enter the transcript. Outputs are declared in `finish` as refs to the elements holding the values; compile turns each into an `extract` step.
 4. **Policy gate.** Blocked actions are returned to the model as a tool result that states the rule, so it can pick another route. A `confirm` verdict escalates (§11) if policy says `discovery: escalate`, or is treated as a block if `discovery: block`.
 5. **Act and record.** The surface resolves the ref to a live element, performs the action, then the runner derives every locator strategy it can from that element (§8), records which strategy would have resolved it and how many candidates matched (the **baseline**), and stores before and after observation digests.
 6. **Stop conditions.** `finish` with outputs (each output is a `{ ref }` to extract from or a `Value`); `give_up`; `request_human`; `HANDSOFF_MAX_STEPS`; wall-clock timeout; the **stuck detector**: three consecutive identical actions, or three consecutive actions after which the observation digest did not change.
 
-Model invocation details (adaptive thinking, effort, image blocks, `stop_reason` handling) live in [02](02-tech-stack-and-data-model.md#llm-integration). The loop is written by hand rather than with the SDK tool runner because each tool result is a fresh observation and every action passes the gate first ([D-022](08-decision-log.md#d-022--manual-tool-use-loop-on-sdk-types-not-the-beta-tool-runner)).
+Provider selection and per-adapter invocation details (thinking, effort, images, stop-reason handling) live in [02](02-tech-stack-and-data-model.md#llm-integration). The loop is written by hand rather than with the SDK tool runner because each tool result is a fresh observation and every action passes the gate first ([D-022](08-decision-log.md#d-022--manual-tool-use-loop-on-sdk-types-not-the-beta-tool-runner)).
 
 ## 7. Compile: Run → Capability
 
@@ -236,7 +237,7 @@ Compile is deterministic and rule-based ([D-021](08-decision-log.md#d-021--compi
 1. **Prune.** Drop `wait` steps and steps whose only effect was undone by an immediate back-navigation. Keep everything else; a reviewer can delete more in a new version.
 2. **Bind.** `Value.param` uses become `bindings[]` on the step. URL segments equal to a parameter value (whole segment only) become `:name` in the route and a binding marked `inferred: true`.
 3. **Targets.** Each step's recorded strategies become its `TargetSpec`, ordered by the ranking in §8, with the discovery `baseline`.
-4. **Postconditions.** From the before and after observation deltas of each step: URL changed to a pattern; a heading or title appeared; a specific element appeared. The most specific delta becomes the step's postcondition. The last step's postcondition becomes the capability's `success` condition unless `finish` named a better one.
+4. **Postconditions.** From the before and after observation deltas of each step: URL changed to a pattern; a heading or title appeared; a specific element appeared. The most specific delta becomes the step's postcondition. URL changes are read from the frame the step acted in, and frames that were still loading are ignored; text candidates prefer headings over table cells and never contain a parameter value. The last flow step's postcondition text plus the final route pattern become the capability's `success` condition.
 5. **Outputs.** `extract` calls and `finish` output refs become `outputs[]` with a `source` `TargetSpec`, a type, an optional parser (`currency`, `date`, `text`), and a sensitivity inherited from the input it derives from or declared in the goal.
 6. **Risk and confirm.** The policy gate's verdict at discovery time becomes the step's `risk`. Steps that were confirmed by an operator during discovery get `confirm: 'operator'`.
 7. **Detectors.** The capability starts with references to the app profile's shared detectors plus any business outcome the goal declared (for example `MEMBER_NOT_FOUND`) with the observation predicate the developer supplies or that the model reported when it hit that state during discovery.

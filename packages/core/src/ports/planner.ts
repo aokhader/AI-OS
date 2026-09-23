@@ -24,6 +24,8 @@ export interface PlannerTurn {
 }
 
 export interface PlannerInfo {
+  /** Which adapter and endpoint served the run, e.g. `anthropic`, `google`, `scripted`. */
+  provider?: string | undefined;
   model: string;
   effort?: string | undefined;
 }
@@ -38,7 +40,9 @@ export interface TranscriptEntry {
 
 /**
  * The only place a model decides anything. Used by discovery; replay never holds one.
- * Implementations: `@handsoff/llm-anthropic` and the core `ScriptedPlanner` for tests and offline demos.
+ * Implementations: `@handsoff/llm-anthropic`, `@handsoff/llm-openai` (any OpenAI-compatible
+ * endpoint) and the core `ScriptedPlanner` for tests and offline demos. They all speak the planner
+ * protocol in `planners/protocol.ts` (D-030).
  */
 export interface Planner {
   info(): PlannerInfo;

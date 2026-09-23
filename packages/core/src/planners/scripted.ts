@@ -45,7 +45,7 @@ export const ScriptSchema = z.array(ScriptedStepSchema).min(1);
 
 export function createScriptedPlanner(
   script: ScriptedStep[],
-  info: PlannerInfo = { model: 'scripted' },
+  info: PlannerInfo = { provider: 'scripted', model: 'scripted' },
 ): Planner {
   const entries: TranscriptEntry[] = [];
   return {

@@ -1,6 +1,6 @@
 # 02 · Tech Stack and Data Model
 
-Status: stable · Last updated: 2026-09-21
+Status: stable · Last updated: 2026-09-22
 
 The concrete choices behind [01-architecture.md](01-architecture.md). Every type here has a zod schema of the same name in `@handsoff/core` (`CapabilitySchema`, `ConditionSchema`, …) and the TypeScript type is inferred from it. The JSON Schema for `Capability` is exported so a reviewer can validate an artifact without running the code.
 
@@ -12,7 +12,7 @@ The concrete choices behind [01-architecture.md](01-architecture.md). Every type
 | Language | TypeScript 5.9, `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `skipLibCheck` (third-party declarations only) | Errors as data needs exhaustive unions |
 | Schemas | zod 4.x; `z.toJSONSchema` exports the reviewable schemas to `packages/core/schema/` | One definition for validation, types and the reviewable artifact schema |
 | Browser automation | Playwright (Chromium only), headed by default | Accessibility snapshot, frame handling, request routing for the network-level allowlist ([D-002](08-decision-log.md#d-002--perceive-via-accessibility-tree--screenshot-act-via-playwright)) |
-| LLM | `@anthropic-ai/sdk`, default model `claude-opus-5` | See [LLM integration](#llm-integration) ([D-004](08-decision-log.md#d-004--anthropic-claude-behind-a-thin-planner-interface), [D-020](08-decision-log.md#d-020--default-model-claude-opus-5-overridable)) |
+| LLM | `@anthropic-ai/sdk` (reference adapter, default `claude-opus-5`) and the `openai` SDK for any OpenAI-compatible endpoint (Google AI Studio, Groq, OpenRouter, Ollama); provider chosen by `HANDSOFF_LLM_PROVIDER` | See [LLM integration](#llm-integration) ([D-004](08-decision-log.md#d-004--anthropic-claude-behind-a-thin-planner-interface), [D-020](08-decision-log.md#d-020--default-model-claude-opus-5-overridable), [D-031](08-decision-log.md#d-031--provider-selectable-discovery-with-an-openai-compatible-adapter)) |
 | Embedded server | Fastify 5 + `@fastify/websocket` + `@fastify/static` | Small, typed, serves the console build |
 | Console | Vite, React 19, TypeScript, Tailwind v4, TanStack Query, react-router | Minimal, fast to build; no server-side rendering needed |
 | Mock target | Express 5 + EJS, `cookie-session` | Server-rendered on purpose; framesets and tables are trivial in EJS |
@@ -38,45 +38,46 @@ Root scripts (to be created in P0):
 
 ## LLM integration
 
-Facts to hold onto (verified against Anthropic's current TypeScript guidance on 2026-09-21; re-check when implementing):
+The engine talks to a `Planner`; the planner talks to a model. What every planner says and reads back is the **planner protocol** in `packages/core/src/planners/protocol.ts` ([D-030](08-decision-log.md#d-030--planner-protocol-in-core-adapters-translate-wire-formats-only)): the eleven tool schemas (zod, exported as JSON Schema), the system prompt, the observation and turn rendering, and `parseToolCall`, which maps a validated call onto a core `Decision`. Provider packages only translate the protocol into a wire format. Two exist, and `handsoff discover` picks one from the environment ([D-031](08-decision-log.md#d-031--provider-selectable-discovery-with-an-openai-compatible-adapter)):
+
+| Provider id | Package | Endpoint | Key | Default model |
+|---|---|---|---|---|
+| `anthropic` | `@handsoff/llm-anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-opus-5` |
+| `google` | `@handsoff/llm-openai` | Google AI Studio, OpenAI-compatible endpoint (free tier) | `GEMINI_API_KEY` | `gemini-3.8-flash` |
+| `openai` | `@handsoff/llm-openai` | OpenAI | `OPENAI_API_KEY` | none; set `HANDSOFF_MODEL` |
+| `groq` | `@handsoff/llm-openai` | Groq (free tier) | `GROQ_API_KEY` | none |
+| `openrouter` | `@handsoff/llm-openai` | OpenRouter | `OPENROUTER_API_KEY` | none |
+| `ollama` | `@handsoff/llm-openai` | local Ollama on `:11434` | none | none |
+| `openai-compatible` | `@handsoff/llm-openai` | `HANDSOFF_LLM_BASE_URL` | `HANDSOFF_LLM_API_KEY` | none |
+
+Selection: `--provider`, else `HANDSOFF_LLM_PROVIDER`, else the first key present in the order above. `HANDSOFF_MODEL` and `HANDSOFF_EFFORT` apply to whichever provider is chosen. The provider and the model that served the run land in the capability's `provenance` and in the transcript.
+
+Common to both adapters:
+
+- Tools: `click`, `type_text`, `type_param`, `select_option`, `select_param`, `press_key`, `navigate`, `wait`, `finish`, `give_up`, `request_human`. Flat schemas with `additionalProperties: false`, generated from the zod schema the planner validates with; the engine validates the resulting `Decision` again ([D-028](08-decision-log.md#d-028--flat-parameter-tools-instead-of-a-value-union-in-the-model-facing-schemas)).
+- One decision per observation. Replies without a tool call, truncated replies and invalid inputs are retried up to twice within one decision with the problem fed back; after that the planner gives up with the reason, which the engine records.
+- Screenshots ride only on the two most recent user messages; older ones keep the text. This keeps requests small and, on Anthropic, the cached prefix stable.
+- The planner never sees a parameter value (the `*_param` tools take a name), and the transcript persisted to the run folder is redacted.
+
+Anthropic adapter (`packages/llm-anthropic/src/planner.ts`), verified against Anthropic's TypeScript guidance on 2026-09-21:
 
 - Client: `new Anthropic()` reads `ANTHROPIC_API_KEY` from the environment. Never pass a key in code.
-- Model: `claude-opus-5` by default. `HANDSOFF_MODEL` overrides, for example `claude-sonnet-5` for cheaper iteration.
-- Thinking: adaptive. `thinking: { type: "adaptive" }`. Do **not** send `budget_tokens` (rejected on Opus 5). Effort via `output_config: { effort: "high" }`; `HANDSOFF_EFFORT` overrides (`low` … `max`).
-- Tools: one tool per `Action` kind plus `finish`, `give_up`, `request_human`. Each tool has `strict: true`, `additionalProperties: false`, and an `input_schema` generated from the same zod schema the engine validates with. `tool_choice: { type: "auto", disable_parallel_tool_use: true }` so the model proposes exactly one action per observation.
-- Observations reach the model as a `tool_result` whose content is a text block (the compact node listing) followed by an image block `{ type: "image", source: { type: "base64", media_type: "image/png", data } }` holding the masked screenshot.
-- Prompt caching: the system prompt and tool list are stable, so the system block carries `cache_control: { type: "ephemeral" }`. Observations are volatile and come after it. Check `usage.cache_read_input_tokens` in the run log.
-- `stop_reason` handling is explicit ([D-022](08-decision-log.md#d-022--manual-tool-use-loop-on-sdk-types-not-the-beta-tool-runner)): `tool_use` → validate input with zod, gate, act, append result; `end_turn` with no tool → treat as `give_up` with the model's text as reason; `max_tokens` → retry once with a higher limit, then fail; `refusal` → stop, record `stop_details`; `pause_turn` → append the assistant content and continue.
-- No assistant prefill (rejected on current models). Format is controlled through tool schemas.
-- Refusal fallbacks: Anthropic's current guidance is to enable server-side `fallbacks: "default"` (beta header `server-side-fallback-2026-07-01`, on `client.beta.messages`) for Opus 5 code. HandsOff enables it by default and `HANDSOFF_FALLBACKS=off` disables it; the model that actually served the turn is recorded in provenance.
-- All API data structures use SDK types: `Anthropic.MessageParam`, `Anthropic.ToolUseBlock`, `Anthropic.ToolResultBlockParam`, `Anthropic.Message`. No hand-rolled equivalents.
+- Thinking: adaptive, `thinking: { type: "adaptive" }`, no `budget_tokens` (rejected on Opus 5). Effort via `output_config: { effort }`, default `high`.
+- Tools are `strict: true`; `tool_choice: { type: "auto", disable_parallel_tool_use: true }` so the model proposes exactly one action per observation.
+- Observations reach the model as a `tool_result` whose content is a text block followed by an image block; the system prompt carries `cache_control: { type: "ephemeral" }`. Check `usage.cache_read_input_tokens` in the transcript.
+- `stop_reason` handling is explicit ([D-022](08-decision-log.md#d-022--manual-tool-use-loop-on-sdk-types-not-the-beta-tool-runner)): `tool_use` → validate, gate, act; `end_turn` with no tool → nudge, then `give_up` with the model's text; `max_tokens` → retry with a higher limit; `refusal` → stop with `stop_details`; `pause_turn` → continue.
+- Refusal fallbacks: `client.beta.messages.create` with `fallbacks: "default"` and the `server-side-fallback-2026-07-01` beta. `HANDSOFF_FALLBACKS=off` disables it, and a 400 that rejects the parameter makes the planner continue without it. The model that actually served a turn is recorded.
+- No assistant prefill. All API data structures use SDK types (`Anthropic.Beta.BetaMessageParam`, `BetaToolUseBlock`, …); no hand-rolled equivalents.
 
-Loop sketch (the real one lives in `packages/llm-anthropic/src/planner.ts`):
+OpenAI-compatible adapter (`packages/llm-openai/src/planner.ts`), over the `openai` SDK with `baseURL` pointed at the chosen endpoint:
 
-```ts
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic();
-
-const response = await client.messages.create({
-  model: process.env.HANDSOFF_MODEL ?? "claude-opus-5",
-  max_tokens: 16000,
-  thinking: { type: "adaptive" },
-  output_config: { effort: (process.env.HANDSOFF_EFFORT as Effort) ?? "high" },
-  system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-  tools,                                   // strict tools generated from zod
-  tool_choice: { type: "auto", disable_parallel_tool_use: true },
-  messages,                                // Anthropic.MessageParam[]
-});
-
-for (const block of response.content) {
-  if (block.type === "tool_use") {
-    const parsed = ActionToolInput.safeParse(block.input);  // never trust tolerant parsing
-    // → Decision handed back to the engine; the engine gates, acts, observes,
-    //   and appends { type: "tool_result", tool_use_id: block.id, content: [text, image] }
-  }
-}
-```
+- Tools are `{ type: "function", function: { name, description, parameters } }` without `strict`, because the compatible endpoints differ on strict-mode support and the zod validation on the way back is the real check. `tool_choice: "auto"`.
+- The result of the previous action goes back as the `tool` message for the pending call; the new observation follows as a `user` message with a text part and, where the endpoint takes images, an `image_url` data URL. Tool messages cannot carry images, which is why the two are split.
+- If the model returns several tool calls, only the first is kept in the history and executed; the next tool result says so.
+- `finish_reason` handling: a function call under `tool_calls` or `stop` → validate; `stop` without a call → nudge; `length` → nudge; `content_filter` → `give_up`.
+- `reasoning_effort` is forwarded for `google` and `openai` (Gemini accepts `none` … `high`; `xhigh` and `max` clamp to `high`) and dropped on a 400 that names it. Images are on for `google` and `openai` and off elsewhere; `HANDSOFF_LLM_IMAGES=on|off` overrides, and a 400 that names images makes the planner continue with text only.
+- The SDK retries 429 and 5xx with backoff, five times by default, which is what a free tier needs.
+- Verified against Google's OpenAI-compatibility documentation on 2026-09-22: function calling, `image_url` data URLs and `reasoning_effort` are supported on the endpoint, and unknown parameters are ignored rather than rejected.
 
 The planner never acts. It returns a `Decision`; the engine in `core` owns the gate, the surface and the recording.
 
@@ -432,8 +433,8 @@ This document defines data. Behaviour lives behind the six port interfaces in [0
 | Port | Implemented by | One line |
 |---|---|---|
 | `Surface` | `@handsoff/surface-playwright` | observe, act on a ref, close; human-action capture in P6. Resolution is `resolveTarget()` in core, not a surface method |
-| `Planner` | `@handsoff/llm-anthropic`; `ScriptedPlanner` in core for tests | one `Decision` per observation during discovery |
-| `RecoveryPlanner` | `@handsoff/llm-anthropic`, optional | at most one proposed `Action` for a failed replay step |
+| `Planner` | `@handsoff/llm-anthropic`, `@handsoff/llm-openai`; `ScriptedPlanner` in core for tests; all over the planner protocol in core | one `Decision` per observation during discovery |
+| `RecoveryPlanner` | a planner package, optional | at most one proposed `Action` for a failed replay step |
 | `Store` | filesystem implementation in core (`createFsStore`) | capabilities, runs (a `RunHandle` appends events and writes screenshots, snapshots and the result), escalations, app profiles; everything read from disk is validated with its zod schema |
 | `PolicyGate` | core | `Verdict` for every action before it executes |
 | `Redactor` | core | masks observations, screenshots, params and transcripts |
@@ -601,10 +602,13 @@ Points a reviewer should be able to check from this file alone: what the capabil
 
 | Variable | Default | Used by |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | none | discovery only; replay never reads it |
-| `HANDSOFF_MODEL` | `claude-opus-5` | planner |
-| `HANDSOFF_EFFORT` | `high` | planner |
-| `HANDSOFF_FALLBACKS` | `on` | planner |
+| `HANDSOFF_LLM_PROVIDER` | detected from the keys below | discovery only: `anthropic`, `google`, `openai`, `groq`, `openrouter`, `ollama`, `openai-compatible` |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | none | discovery only; replay never reads them |
+| `HANDSOFF_LLM_BASE_URL`, `HANDSOFF_LLM_API_KEY` | none | provider `openai-compatible` |
+| `HANDSOFF_MODEL` | provider default: `claude-opus-5`, `gemini-3.8-flash`; required elsewhere | planner |
+| `HANDSOFF_EFFORT` | `high` for anthropic; forwarded to google and openai only | planner |
+| `HANDSOFF_LLM_IMAGES` | preset: on for anthropic, google, openai | planner |
+| `HANDSOFF_FALLBACKS` | `on` | anthropic planner |
 | `HANDSOFF_PORT` | `4000` | embedded server |
 | `HANDSOFF_DATA_DIR` | `./data` | store |
 | `HANDSOFF_POLICY` | `./config/policy.json` | policy gate |

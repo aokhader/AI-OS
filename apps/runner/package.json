@@ -13,6 +13,7 @@
   "dependencies": {
     "@handsoff/core": "workspace:*",
     "@handsoff/llm-anthropic": "workspace:*",
+    "@handsoff/llm-openai": "workspace:*",
     "@handsoff/surface-playwright": "workspace:*",
     "commander": "^14.0.0"
   },

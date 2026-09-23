@@ -16,7 +16,12 @@ import {
   type SurfaceKind,
   type TargetSpec,
 } from '../schema/index.js';
-import { canonicalizePath, derivePostcondition, firstSalientText } from './derive-postcondition.js';
+import {
+  canonicalizePath,
+  derivePostcondition,
+  firstSalientText,
+  flowFrame,
+} from './derive-postcondition.js';
 import { baselineOf, deriveTargetSpec } from './derive-target.js';
 
 /** A step as discovery recorded it, with the observations around it. */
@@ -58,6 +63,7 @@ export interface CompileInput {
   outputSensitivity: Sensitivity;
   provenance: {
     runId: string;
+    provider?: string | undefined;
     model: string;
     effort?: string | undefined;
     recordedAt: string;
@@ -144,9 +150,7 @@ export function compileCapability(input: CompileInput): Capability {
   }
 
   const lastFlowStep = [...steps].reverse().find((s) => s.action.kind !== 'extract');
-  const finalFrame = [...input.finalObservation.frames].sort(
-    (a, b) => b.framePath.length - a.framePath.length,
-  )[0];
+  const finalFrame = flowFrame(input.finalObservation, lastFlowStep?.target?.framePath);
   const { pattern } = canonicalizePath(
     pathnameOf(finalFrame?.url ?? input.finalObservation.url),
     input.values,
@@ -189,6 +193,7 @@ export function compileCapability(input: CompileInput): Capability {
     status: 'draft',
     provenance: {
       runId: input.provenance.runId,
+      ...(input.provenance.provider ? { provider: input.provenance.provider } : {}),
       model: input.provenance.model,
       ...(input.provenance.effort ? { effort: input.provenance.effort } : {}),
       recordedAt: input.provenance.recordedAt,
@@ -196,7 +201,11 @@ export function compileCapability(input: CompileInput): Capability {
       compiler: input.provenance.compiler,
     },
     app: { vendorProductId: input.vendorProductId, surfaceKind: input.surfaceKind },
-    entry: { route: input.entryRoute, requiresAuth: input.requiresAuth, preconditions: entryPreconditions },
+    entry: {
+      route: input.entryRoute,
+      requiresAuth: input.requiresAuth,
+      preconditions: entryPreconditions,
+    },
     inputs: input.inputs,
     outputs,
     steps,

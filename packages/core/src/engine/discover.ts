@@ -1,3 +1,9 @@
+import {
+  compileCapability,
+  type DiscoveredOutput,
+  type DiscoveredStep,
+} from '../compile/compile.js';
+import { baselineOf, deriveTargetSpec } from '../compile/derive-target.js';
 import { classify } from '../conditions/classify.js';
 import { digestOf } from '../digest.js';
 import type { Planner, PlannerTurn } from '../ports/planner.js';
@@ -16,8 +22,6 @@ import {
   type TargetSpec,
 } from '../schema/index.js';
 import { newRunId } from '../store/run-id.js';
-import { compileCapability, type DiscoveredOutput, type DiscoveredStep } from '../compile/compile.js';
-import { baselineOf, deriveTargetSpec } from '../compile/derive-target.js';
 import {
   credentialsFromEnv,
   EngineArgumentError,
@@ -68,7 +72,10 @@ const STUCK_REPEATS = 3;
  * parameters by name only; every action is recorded with locator strategies derived from the
  * element it acted on; a successful run is compiled into a draft capability (§7).
  */
-export async function discover(options: DiscoverOptions, deps: DiscoverDeps): Promise<DiscoveryResult> {
+export async function discover(
+  options: DiscoverOptions,
+  deps: DiscoverDeps,
+): Promise<DiscoveryResult> {
   if (options.params.some((p) => p.value === '')) {
     throw new EngineArgumentError('every parameter needs a value for discovery');
   }
@@ -142,7 +149,9 @@ class DiscoveryEngine extends EngineBase {
       const finish = await this.loop();
       const capability = this.compile(finish, run);
       await this.deps.store.capabilities.put(capability);
-      this.log(`compiled ${capability.id} v${capability.version} (${capability.steps.length} steps)`);
+      this.log(
+        `compiled ${capability.id} v${capability.version} (${capability.steps.length} steps)`,
+      );
       result = {
         status: 'compiled',
         capability: { id: capability.id, version: capability.version },
@@ -162,7 +171,10 @@ class DiscoveryEngine extends EngineBase {
         .concat('\n'),
     );
     await this.event({ type: 'result', actor: 'automation', result });
-    await this.run.update({ finishedAt: this.now().toISOString(), sideEffects: this.sideEffects() });
+    await this.run.update({
+      finishedAt: this.now().toISOString(),
+      sideEffects: this.sideEffects(),
+    });
     await this.run.finish(result);
     this.log(`discovery ${run.id} finished: ${result.status}`);
     return result;
@@ -204,7 +216,10 @@ class DiscoveryEngine extends EngineBase {
         turn,
         goal: this.options.goal,
         params,
-        observation: { ...redacted, ...(obs.screenshotPng ? { screenshotPng: obs.screenshotPng } : {}) },
+        observation: {
+          ...redacted,
+          ...(obs.screenshotPng ? { screenshotPng: obs.screenshotPng } : {}),
+        },
         ...(lastAction ? { lastAction } : {}),
         stepsRemaining: maxSteps - turn,
       });
@@ -227,7 +242,10 @@ class DiscoveryEngine extends EngineBase {
           return { outputs: outputs.outputs, finalObservation: obs, firstObservation };
         }
         case 'give_up':
-          throw new Stop({ kind: 'stopped', status: 'gave_up', reason: decision.reason }, `t${turn}`);
+          throw new Stop(
+            { kind: 'stopped', status: 'gave_up', reason: decision.reason },
+            `t${turn}`,
+          );
         case 'request_human':
           throw new Stop(
             {
@@ -255,16 +273,24 @@ class DiscoveryEngine extends EngineBase {
     decision: Extract<Decision, { kind: 'tool' }>,
     obs: SurfaceObservation,
     turn: number,
-  ): Promise<{ status: 'ok' | 'failed' | 'invalid' | 'blocked'; detail: string; pending?: PendingStep }> {
+  ): Promise<{
+    status: 'ok' | 'failed' | 'invalid' | 'blocked';
+    detail: string;
+    pending?: PendingStep;
+  }> {
     const stepId = `t${turn}`;
     const action = decision.action;
     const targetRef = actionTarget(action);
     let node: SurfaceObservation['nodes'][number] | undefined;
     if (targetRef) {
-      if (!('ref' in targetRef)) return { status: 'invalid', detail: 'the planner must target a ref' };
+      if (!('ref' in targetRef))
+        return { status: 'invalid', detail: 'the planner must target a ref' };
       node = obs.nodes.find((n) => n.ref === targetRef.ref);
       if (!node) {
-        return { status: 'invalid', detail: `ref ${targetRef.ref} is not in the current observation` };
+        return {
+          status: 'invalid',
+          detail: `ref ${targetRef.ref} is not in the current observation`,
+        };
       }
     }
     for (const u of actionParams(action)) {
@@ -298,7 +324,9 @@ class DiscoveryEngine extends EngineBase {
       actor: 'automation',
       stepId,
       action,
-      ...(baseline ? { resolvedBy: baseline.resolvedBy, candidateCount: baseline.candidateCount } : {}),
+      ...(baseline
+        ? { resolvedBy: baseline.resolvedBy, candidateCount: baseline.candidateCount }
+        : {}),
       durationMs: Date.now() - started,
     });
     if (!r.ok) return { status: 'failed', detail: `${r.reason}: ${r.detail}` };
@@ -363,7 +391,10 @@ class DiscoveryEngine extends EngineBase {
     for (const [name, v] of Object.entries(decision.outputs)) {
       if ('ref' in v) {
         const node = obs.nodes.find((n) => n.ref === v.ref);
-        if (!node) return { error: `output ${name} refers to ${v.ref}, which is not in the current observation` };
+        if (!node)
+          return {
+            error: `output ${name} refers to ${v.ref}, which is not in the current observation`,
+          };
         outputs.push({ name, node, raw: node.value ?? node.name });
       } else {
         try {
@@ -395,14 +426,26 @@ class DiscoveryEngine extends EngineBase {
     const last = this.signatures.slice(-n);
     if (last.length === n && last.every((s) => s === last[0])) {
       throw new Stop(
-        { kind: 'stopped', status: 'limit', reason: `stuck: the same action was repeated ${n} times` },
+        {
+          kind: 'stopped',
+          status: 'limit',
+          reason: `stuck: the same action was repeated ${n} times`,
+        },
         this.currentStep,
       );
     }
     const digests = [...this.digests.slice(-(n - 1)), digestOf(obs)];
-    if (this.digests.length >= n - 1 && digests.every((d) => d === digests[0]) && this.steps.length >= n) {
+    if (
+      this.digests.length >= n - 1 &&
+      digests.every((d) => d === digests[0]) &&
+      this.steps.length >= n
+    ) {
       throw new Stop(
-        { kind: 'stopped', status: 'limit', reason: `stuck: ${n} actions produced no observable change` },
+        {
+          kind: 'stopped',
+          status: 'limit',
+          reason: `stuck: ${n} actions produced no observable change`,
+        },
         this.currentStep,
       );
     }
@@ -411,7 +454,11 @@ class DiscoveryEngine extends EngineBase {
   // ---- compile and results -------------------------------------------------------------------
 
   private compile(
-    finish: { outputs: DiscoveredOutput[]; finalObservation: SurfaceObservation; firstObservation: SurfaceObservation },
+    finish: {
+      outputs: DiscoveredOutput[];
+      finalObservation: SurfaceObservation;
+      firstObservation: SurfaceObservation;
+    },
     run: Run,
   ) {
     const { options } = this;
@@ -443,6 +490,7 @@ class DiscoveryEngine extends EngineBase {
       outputSensitivity: options.outputSensitivity ?? 'sensitive',
       provenance: {
         runId: run.id,
+        provider: info.provider,
         model: info.model,
         effort: info.effort,
         recordedAt: this.now().toISOString(),
@@ -474,9 +522,13 @@ class DiscoveryEngine extends EngineBase {
     }
     const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     this.log(`engine error: ${message}`);
-    return { status: 'aborted', reason: message, stepsRecorded: this.recorded.length, evidence: this.evidence(true) };
+    return {
+      status: 'aborted',
+      reason: message,
+      stepsRecorded: this.recorded.length,
+      evidence: this.evidence(true),
+    };
   }
-
 }
 
 function withSpec(action: Action, spec: TargetSpec): Action {

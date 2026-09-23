@@ -100,25 +100,55 @@ describe('discover → compile → replay', () => {
     if (!capability) return;
     expect(capability.version).toBe(1);
     expect(capability.status).toBe('draft');
-    expect(capability.steps.map((s) => s.action.kind)).toEqual(['type', 'click', 'click', 'extract']);
-    expect(capability.steps.every((s) => s.target === undefined || s.target.strategies.length <= 3)).toBe(true);
+    expect(capability.steps.map((s) => s.action.kind)).toEqual([
+      'type',
+      'click',
+      'click',
+      'extract',
+    ]);
+    expect(
+      capability.steps.every((s) => s.target === undefined || s.target.strategies.length <= 3),
+    ).toBe(true);
 
     const s1 = capability.steps[0];
     expect(s1?.bindings).toContainEqual({ param: 'memberId', field: 'value', inferred: false });
-    expect(s1?.target?.strategies[0]).toMatchObject({ kind: 'anchored', anchor: 'Member #', relation: 'labels' });
+    expect(s1?.target?.strategies[0]).toMatchObject({
+      kind: 'anchored',
+      anchor: 'Member #',
+      relation: 'labels',
+    });
     expect(s1?.baseline).toEqual({ resolvedBy: 0, candidateCount: 1 });
 
     const s2 = capability.steps[1];
-    expect(s2?.target?.strategies[0]).toMatchObject({ kind: 'role', role: 'button', name: 'Search' });
+    expect(s2?.target?.strategies[0]).toMatchObject({
+      kind: 'role',
+      role: 'button',
+      name: 'Search',
+    });
     expect(s2?.postcondition.when.textPresent).toEqual(['Search Results']);
 
     const s3 = capability.steps[2];
     expect(s3?.postcondition.when.url).toBe('/members/:memberId');
-    expect(s3?.bindings).toContainEqual({ param: 'memberId', field: 'postcondition.url', inferred: true });
+    expect(s3?.bindings).toContainEqual({
+      param: 'memberId',
+      field: 'postcondition.url',
+      inferred: true,
+    });
 
     const s4 = capability.steps[3];
-    expect(s4?.target?.strategies[0]).toMatchObject({ kind: 'anchored', relation: 'same-row-column', anchor: 'Savings', column: 'Balance' });
-    expect(capability.outputs[0]).toMatchObject({ name: 'savingsBalance', type: 'number', parser: 'currency', atStep: 's4', sensitivity: 'sensitive' });
+    expect(s4?.target?.strategies[0]).toMatchObject({
+      kind: 'anchored',
+      relation: 'same-row-column',
+      anchor: 'Savings',
+      column: 'Balance',
+    });
+    expect(capability.outputs[0]).toMatchObject({
+      name: 'savingsBalance',
+      type: 'number',
+      parser: 'currency',
+      atStep: 's4',
+      sensitivity: 'sensitive',
+    });
     expect(capability.success.when.url).toBe('/members/:memberId');
     expect(capability.entry.preconditions[0]?.when.textPresent).toEqual(['Member Lookup']);
     expect(capability.detectors.map((d) => d.code)).toEqual(['MEMBER_NOT_FOUND']);
@@ -128,7 +158,10 @@ describe('discover → compile → replay', () => {
     expect(artifact).not.toContain('10001');
     const events = await readFile(path.join(result.evidence.runDir, 'events.jsonl'), 'utf8');
     expect(events).not.toContain('10001');
-    const transcript = await readFile(path.join(result.evidence.runDir, 'transcript.redacted.jsonl'), 'utf8');
+    const transcript = await readFile(
+      path.join(result.evidence.runDir, 'transcript.redacted.jsonl'),
+      'utf8',
+    );
     expect(transcript).not.toContain('10001');
     expect(transcript.trim().split('\n')).toHaveLength(4);
     await stat(path.join(result.evidence.runDir, 'result.json'));
@@ -143,7 +176,10 @@ describe('discover → compile → replay', () => {
     const run = async (memberId: string) => {
       const surface = await createPlaywrightSurface({ headless: true });
       try {
-        return await replay({ capability, params: { memberId }, baseUrl }, { surface, store, profile, env });
+        return await replay(
+          { capability, params: { memberId }, baseUrl },
+          { surface, store, profile, env },
+        );
       } finally {
         await surface.close();
       }

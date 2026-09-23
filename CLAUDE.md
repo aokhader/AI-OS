@@ -9,7 +9,7 @@ Computer-use automation for legacy banking software: an LLM discovers how to com
 ## Non-negotiables
 
 1. **No secrets or real data in the repo.** `.env` is git-ignored. Fixtures and evidence use synthetic data and pass through the redactor.
-2. **No LLM on the replay path** except `RecoveryPlanner` behind `policy.assistedFallback`. `packages/core` must not import Playwright or the Anthropic SDK.
+2. **No LLM on the replay path** except `RecoveryPlanner` behind `policy.assistedFallback`. `packages/core` must not import Playwright or any model SDK.
 3. **Never edit `/evidence/`.** Replace a folder with a fresh run if it is wrong, in a commit that says so.
 4. **Record before deviating.** Any change to a schema, seam, result status, policy default or roadmap order gets a `D-0NN` entry in `docs/context/08-decision-log.md` first.
 5. **Keep the brief's deliverable paths and headings exactly:** `/README.md`, `/REPORT.md` with its seven headings in order, `/evidence/`.

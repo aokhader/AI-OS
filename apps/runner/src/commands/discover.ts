@@ -10,8 +10,8 @@ import {
   ScriptSchema,
   type Sensitivity,
 } from '@handsoff/core';
-import { createAnthropicPlanner } from '@handsoff/llm-anthropic';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
+import { createPlannerFromEnv } from './planner.js';
 import { loadEnv, parseParams } from './replay.js';
 
 export interface DiscoverCommandOptions {
@@ -28,6 +28,7 @@ export interface DiscoverCommandOptions {
   baseUrl?: string | undefined;
   headless?: boolean | undefined;
   maxSteps?: string | undefined;
+  provider?: string | undefined;
   model?: string | undefined;
   effort?: string | undefined;
   scripted?: string | undefined;
@@ -95,26 +96,30 @@ export async function runDiscoverCommand(opts: DiscoverCommandOptions): Promise<
     planner = createScriptedPlanner(script);
     console.error(`planner: scripted (${script.length} steps from ${opts.scripted})`);
   } else {
-    if (!env.ANTHROPIC_API_KEY && !env.ANTHROPIC_AUTH_TOKEN) {
-      console.error(
-        'discovery needs ANTHROPIC_API_KEY (or ANTHROPIC_AUTH_TOKEN) in the environment or .env; use --scripted <file> to run without a model',
-      );
-      return 2;
-    }
-    planner = createAnthropicPlanner({
-      model: opts.model ?? env.HANDSOFF_MODEL,
-      effort: opts.effort ?? env.HANDSOFF_EFFORT,
-      fallbacks: env.HANDSOFF_FALLBACKS !== 'off',
+    const picked = createPlannerFromEnv({
+      provider: opts.provider,
+      model: opts.model,
+      effort: opts.effort,
+      env,
       log: (line) => console.error(`  ${line}`),
     });
+    if (!picked.ok) {
+      console.error(picked.error);
+      return 2;
+    }
+    planner = picked.planner;
     const info = planner.info();
-    console.error(`planner: ${info.model}${info.effort ? ` (effort ${info.effort})` : ''}`);
+    console.error(
+      `planner: ${picked.provider} · ${info.model}${info.effort ? ` (effort ${info.effort})` : ''}`,
+    );
   }
 
   const baseUrl = opts.baseUrl ?? env.HANDSOFF_TARGET_URL ?? 'http://localhost:4100';
   const headless = opts.headless ?? env.HANDSOFF_HEADLESS === 'true';
   const capabilityId = opts.id ?? slug(opts.goal);
-  console.error(`handsoff discover → ${capabilityId} against ${baseUrl} (${headless ? 'headless' : 'headed'})`);
+  console.error(
+    `handsoff discover → ${capabilityId} against ${baseUrl} (${headless ? 'headless' : 'headed'})`,
+  );
 
   const started = Date.now();
   const surface = await createPlaywrightSurface({ headless });

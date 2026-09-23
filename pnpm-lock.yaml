@@ -100,6 +100,9 @@ importers:
       '@handsoff/llm-anthropic':
         specifier: workspace:*
         version: link:../../packages/llm-anthropic
+      '@handsoff/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
       '@handsoff/surface-playwright':
         specifier: workspace:*
         version: link:../../packages/surface-playwright
@@ -150,6 +153,9 @@ importers:
       '@handsoff/core':
         specifier: workspace:*
         version: link:../core
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: ^22.19.0
@@ -157,6 +163,25 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+
+  packages/llm-openai:
+    dependencies:
+      '@handsoff/core':
+        specifier: workspace:*
+        version: link:../core
+      openai:
+        specifier: ^7.21.0
+        version: 7.21.0(zod@4.6.5)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.0
+        version: 22.20.4
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.1
+        version: 5.0.1(@types/node@22.20.4)(vite@7.3.6(@types/node@22.20.4)(tsx@4.23.15))
 
   packages/surface-playwright:
     dependencies:
@@ -1155,6 +1180,30 @@ packages:
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
+
+  openai@7.21.0:
+    resolution: {integrity: sha512-APwDcMhduWCSkKDLF4VZtAC5MGLRdJ0l+PUirz2fuSPXo/LNfEe8OuJVWOk8iJbO55sd8F5aOXvx8cfR5Eax1g==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
 
   parseurl@1.3.3:
     resolution: {integrity: sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==}
@@ -2304,6 +2353,10 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
+
+  openai@7.21.0(zod@4.6.5):
+    optionalDependencies:
+      zod: 4.6.5
 
   parseurl@1.3.3: {}
 

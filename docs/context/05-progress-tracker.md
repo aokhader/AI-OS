@@ -1,6 +1,6 @@
 # 05 · Progress Tracker
 
-Status: draft · Last updated: 2026-09-21
+Status: draft · Last updated: 2026-09-22
 
 Updated at the end of every working session. Phases mirror [04-roadmap.md](04-roadmap.md). Check a box only when the phase's exit criterion is demonstrably met, not when the code exists.
 
@@ -13,6 +13,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 | 2026-09-21 | 1 | `docs/context/` created: overview, architecture, tech stack and data model, decision log; skeletons for UI, roadmap, tracker, AI rules, code standards; root `CLAUDE.md` | P0: workspace scaffold, mock app happy path, core schemas |
 | 2026-09-21 | 2 | P0 complete. pnpm workspace with six packages; Biome, vitest, base tsconfig; core zod schemas with cross-field rules and 24 tests; JSON Schema export; app profile and policy files validate; legacy-bank happy path (frameset, tables, no ids) with 11 supertest tests, variant B branding and labels included; CLI skeleton; console shell. Docs updated: D-025, stack table, bootstrap credentials, policy patterns | P1: `surface-playwright` observe / act / resolve, filesystem store, replay engine skeleton, hand-written artifact replays with zero LLM |
 | 2026-09-21 | 3 | P1 complete. `surface-playwright` with an in-page walker (roles, names, values, bounding boxes, frame paths, structural paths), acting by ref, native dialog tracking; pure `resolveTarget` with the three strategies; predicate evaluation and the ordered classifier; replay engine with bootstrap, preconditions, postcondition waits, output extraction and the full result contract; filesystem store; `handsoff replay` CLI; Chromium integration test. `pnpm handsoff replay … memberId=10001` → success, savingsBalance 1250.75, 3.4 s, 14 screenshots; `memberId=99999` → outcome MEMBER_NOT_FOUND at s2, exit 3. Decisions D-026, D-027 | P2: Anthropic planner, discovery loop, redaction of params in observation and transcript, one real run copied to `/evidence/` |
+| 2026-09-21 | 4 | P2 built, real run pending. Shared engine base for both engines; `Planner` port; Anthropic planner with eleven flat strict tools, `*_param` tools, hand-written loop with explicit stop reasons, screenshots only on the last two turns, opt-out server-side fallbacks; discovery loop with stuck detector, provenance bindings, target derivation with baseline, transcript persisted redacted; rule-based compiler (postconditions from observation deltas, outputs as extract steps, route canonicalisation, salience ranking); `ScriptedPlanner`; `handsoff discover` with `--scripted`; `pnpm evidence:copy`. Integration test closes discover → compile → replay with no model (P3's exit criterion). 62 unit, 4 integration tests. Decisions D-028, D-029 | Real discovery run with `ANTHROPIC_API_KEY`, then `pnpm evidence:copy <runId> discovery-run`; P3 console skeleton |
+| 2026-09-22 | 5 | Discovery made provider-agnostic (no Anthropic credit available). Planner protocol (tool schemas, prompt, rendering, `parseToolCall`) moved into core; `@handsoff/llm-openai` over the OpenAI chat-completions protocol with presets for Google AI Studio, OpenAI, Groq, OpenRouter, Ollama and custom endpoints, image and effort fallbacks on 400; `handsoff discover --provider` / `HANDSOFF_LLM_PROVIDER` with key detection; `provider` in `PlannerInfo` and provenance; JSON Schema regenerated. 74 unit tests (12 new), 4 integration tests. Decisions D-030, D-031 | Real discovery run with `GEMINI_API_KEY` (free tier) or any other provider, then `pnpm evidence:copy <runId> discovery-run`; P3 console skeleton |
 
 ## Phases
 
@@ -34,16 +36,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 - [x] Hand-written `get-member-savings-balance` replays to `success` (CLI and integration test); unknown member → `outcome`
 
 ### P2 · Discovery
-- [ ] Planner with strict tools and `{ param }` values
-- [ ] Discovery loop, stop conditions, stuck detector
-- [ ] Redaction in observation and transcript
-- [ ] `ScriptedPlanner` and a fixture-driven discovery test
-- [ ] One real run completed and copied to `evidence/discovery-run/`
+- [x] Planner with strict tools and `*_param` tools (parameters by name, never by value)
+- [x] Discovery loop, stop conditions, stuck detector
+- [x] Redaction in observation, event log, snapshots and transcript
+- [x] `ScriptedPlanner` and an integration test that discovers, compiles and replays with no model
+- [ ] One real run completed and copied to `evidence/discovery-run/` (needs a key for any supported provider, e.g. `GEMINI_API_KEY` on the free tier; command in the README)
 
 ### P3 · Compile and close the thread
-- [ ] Compile passes: prune, bind, targets with baseline, postconditions, outputs, provenance, route canonicalisation
-- [ ] Versioning with `latest.json`
-- [ ] Compiled artifact replays with matching outputs
+- [x] Compile passes: prune, bind by provenance, targets with baseline, postconditions from deltas, outputs as extract steps, provenance, route canonicalisation (built in P2)
+- [x] Versioning with `latest.json` (a new discovery of an existing id writes the next version with `supersedes`)
+- [x] Compiled artifact replays with matching outputs (integration test: success 1250.75, outcome MEMBER_NOT_FOUND)
 - [ ] Console skeleton lists runs and capabilities
 
 ### P4 · Conditions and the result contract

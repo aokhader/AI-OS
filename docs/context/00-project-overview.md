@@ -112,7 +112,7 @@ sequenceDiagram
     participant Dev as Developer (CLI)
     participant Runner as handsoff runner
     participant Gate as PolicyGate
-    participant LLM as Planner (Claude)
+    participant LLM as Planner (LLM adapter)
     participant Surf as Surface (Playwright)
     participant App as legacy-bank
 

@@ -79,15 +79,29 @@ export function deriveTargetSpec(
     if (interactive) {
       for (let c = pos.col - 1; c >= 1; c--) {
         const cell = cellAt(frameNodes, pos.rowPath, c);
-        if (cell?.name.trim() && !looksLikeData(cell.name) && !containsAny(cell.name, paramValues)) {
-          proposals.push({ kind: 'anchored', anchor: cell.name, relation: 'labels', role: node.role });
+        if (
+          cell?.name.trim() &&
+          !looksLikeData(cell.name) &&
+          !containsAny(cell.name, paramValues)
+        ) {
+          proposals.push({
+            kind: 'anchored',
+            anchor: cell.name,
+            relation: 'labels',
+            role: node.role,
+          });
           break;
         }
       }
     }
     const rowAnchor = firstNamedCellInRow(frameNodes, pos.rowPath, node, paramValues);
     const header = cellAt(frameNodes, `${pos.tablePath}/tr[1]`, pos.col);
-    if (rowAnchor && header?.name.trim() && !looksLikeData(header.name) && header.ref !== node.ref) {
+    if (
+      rowAnchor &&
+      header?.name.trim() &&
+      !looksLikeData(header.name) &&
+      header.ref !== node.ref
+    ) {
       proposals.push({
         kind: 'anchored',
         anchor: rowAnchor.name,
@@ -101,7 +115,12 @@ export function deriveTargetSpec(
   if (interactive && !proposals.some((p) => p.kind === 'anchored')) {
     const left = nearestTextLeft(frameNodes, node, paramValues);
     if (left) {
-      proposals.push({ kind: 'anchored', anchor: left.name, relation: 'right-of', role: node.role });
+      proposals.push({
+        kind: 'anchored',
+        anchor: left.name,
+        relation: 'right-of',
+        role: node.role,
+      });
     }
   }
 
