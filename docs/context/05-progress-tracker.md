@@ -1,6 +1,6 @@
 # 05 · Progress Tracker
 
-Status: draft · Last updated: 2026-09-22
+Status: draft · Last updated: 2026-09-23
 
 Updated at the end of every working session. Phases mirror [04-roadmap.md](04-roadmap.md). Check a box only when the phase's exit criterion is demonstrably met, not when the code exists.
 
@@ -15,6 +15,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 | 2026-09-21 | 3 | P1 complete. `surface-playwright` with an in-page walker (roles, names, values, bounding boxes, frame paths, structural paths), acting by ref, native dialog tracking; pure `resolveTarget` with the three strategies; predicate evaluation and the ordered classifier; replay engine with bootstrap, preconditions, postcondition waits, output extraction and the full result contract; filesystem store; `handsoff replay` CLI; Chromium integration test. `pnpm handsoff replay … memberId=10001` → success, savingsBalance 1250.75, 3.4 s, 14 screenshots; `memberId=99999` → outcome MEMBER_NOT_FOUND at s2, exit 3. Decisions D-026, D-027 | P2: Anthropic planner, discovery loop, redaction of params in observation and transcript, one real run copied to `/evidence/` |
 | 2026-09-21 | 4 | P2 built, real run pending. Shared engine base for both engines; `Planner` port; Anthropic planner with eleven flat strict tools, `*_param` tools, hand-written loop with explicit stop reasons, screenshots only on the last two turns, opt-out server-side fallbacks; discovery loop with stuck detector, provenance bindings, target derivation with baseline, transcript persisted redacted; rule-based compiler (postconditions from observation deltas, outputs as extract steps, route canonicalisation, salience ranking); `ScriptedPlanner`; `handsoff discover` with `--scripted`; `pnpm evidence:copy`. Integration test closes discover → compile → replay with no model (P3's exit criterion). 62 unit, 4 integration tests. Decisions D-028, D-029 | Real discovery run with `ANTHROPIC_API_KEY`, then `pnpm evidence:copy <runId> discovery-run`; P3 console skeleton |
 | 2026-09-22 | 5 | Discovery made provider-agnostic (no Anthropic credit available). Planner protocol (tool schemas, prompt, rendering, `parseToolCall`) moved into core; `@handsoff/llm-openai` over the OpenAI chat-completions protocol with presets for Google AI Studio, OpenAI, Groq, OpenRouter, Ollama and custom endpoints, image and effort fallbacks on 400; `handsoff discover --provider` / `HANDSOFF_LLM_PROVIDER` with key detection; `provider` in `PlannerInfo` and provenance; JSON Schema regenerated. 74 unit tests (12 new), 4 integration tests. Decisions D-030, D-031 | Real discovery run with `GEMINI_API_KEY` (free tier) or any other provider, then `pnpm evidence:copy <runId> discovery-run`; P3 console skeleton |
+| 2026-09-23 | 6 | P2 and P3 closed. Real discovery runs with Gemini (`gemini-3.8-flash` via Google AI Studio, provider `google`): the first compiled v2 in 4 turns but anchored the results row's `View` link on the member's name and status, which led to D-032 (rows keyed by a parameter value contribute no anchors); the re-run after the fix compiled v3 (4 steps, `role`+`structural` for the link, no leaks), which replays to `1250.75` with every strategy resolving first-try and to `MEMBER_NOT_FOUND` for an unknown member. `evidence/discovery-run/` holds that run and `capability.get-member-savings-balance.v3.json`. `handsoff serve`: Fastify read API (`/api/runs`, `/api/runs/:id`, `/api/run-files`, `/api/capabilities[/:id[/v/:n]]`) with 5 tests, serves the console build; console (react-router, TanStack Query, Tailwind v4) with runs, run detail (result, step reports, event timeline with screenshots), capabilities and capability detail (every locator strategy, conditions, raw JSON). `.env` duplicate-key warning. 80 unit tests, 4 integration tests. Decision D-032 | P4: chaos modes, app-profile detectors, classifier budgets, recoveries, full `ReplayResult`, fixture tests, `evidence/replay-member-not-found/` |
 
 ## Phases
 
@@ -40,13 +41,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 - [x] Discovery loop, stop conditions, stuck detector
 - [x] Redaction in observation, event log, snapshots and transcript
 - [x] `ScriptedPlanner` and an integration test that discovers, compiles and replays with no model
-- [ ] One real run completed and copied to `evidence/discovery-run/` (needs a key for any supported provider, e.g. `GEMINI_API_KEY` on the free tier; command in the README)
+- [x] One real run completed and copied to `evidence/discovery-run/` (Gemini via Google AI Studio, run `run_20260923_020413_4203`, compiled v3; session 6)
 
 ### P3 · Compile and close the thread
 - [x] Compile passes: prune, bind by provenance, targets with baseline, postconditions from deltas, outputs as extract steps, provenance, route canonicalisation (built in P2)
 - [x] Versioning with `latest.json` (a new discovery of an existing id writes the next version with `supersedes`)
 - [x] Compiled artifact replays with matching outputs (integration test: success 1250.75, outcome MEMBER_NOT_FOUND)
-- [ ] Console skeleton lists runs and capabilities
+- [x] Console skeleton lists runs and capabilities (`handsoff serve` + `pnpm console`; session 6)
 
 ### P4 · Conditions and the result contract
 - [ ] Chaos modes: not-found, validation, session-expiry, interstitial
@@ -93,21 +94,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` cut (say w
 
 | Brief | Requirement | Status | Evidence |
 |---|---|---|---|
-| §3.1 | Goal-driven agent loop on a real UI | [ ] | |
-| §3.2 | Typed, versioned, reviewable artifact | [ ] | |
-| §3.3 | Deterministic replay with error taxonomy and result contract | [ ] | |
+| §3.1 | Goal-driven agent loop on a real UI | [x] | `evidence/discovery-run/` (Gemini, 4 turns, compiled v3) |
+| §3.2 | Typed, versioned, reviewable artifact | [x] | `evidence/capability.get-member-savings-balance.v3.json`, `packages/core/schema/capability.schema.json`, console capability detail |
+| §3.3 | Deterministic replay with error taxonomy and result contract | [~] | replay to success and to `MEMBER_NOT_FOUND` works; taxonomy, budgets and recoveries in P4 |
 | §3.4 | Allowlist, risky-action handling, redaction | [ ] | |
 | §3.5 | Structured log plus failure evidence | [ ] | |
 | §3.6 | Escalation, live-session handoff, hand-back, recorded human actions | [ ] | |
 | §3.7 | Design for heterogeneity and multi-tenant | [ ] | docs only is acceptable |
-| §4 | At least one real LLM discovery run with evidence | [ ] | |
+| §4 | At least one real LLM discovery run with evidence | [x] | `evidence/discovery-run/` |
 | §6.1 | `/README.md` | [ ] | |
 | §6.2 | `/REPORT.md` seven headings | [ ] | |
 | §6.3 | `/evidence/` | [ ] | |
 
 ## Open questions
 
-- None yet. Add questions here with the date; move them to the decision log when answered.
+- 2026-09-23 · `evidence/discovery-run/steps/*.png` show the member number typed into the search field (synthetic data). Screenshot masking lands in P5; regenerate the evidence run afterwards so the submission shows masked screenshots.
 
 ## Cuts made
 

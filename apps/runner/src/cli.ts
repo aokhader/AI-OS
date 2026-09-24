@@ -2,9 +2,10 @@ import { Command } from 'commander';
 import { runDiscoverCommand } from './commands/discover.js';
 import { PLANNER_PROVIDER_IDS } from './commands/planner.js';
 import { runReplayCommand } from './commands/replay.js';
+import { runServeCommand } from './commands/serve.js';
 
 /**
- * `handsoff` entry point. discover (P2) and replay (P1) are live; serve (P3) follows.
+ * `handsoff` entry point: discover (P2), replay (P1) and serve (P3).
  * See docs/context/04-roadmap.md.
  */
 const program = new Command();
@@ -108,10 +109,12 @@ program
 
 program
   .command('serve')
-  .description('Start the API and operator console without running anything')
-  .action(() => {
-    console.error('serve is not built yet (phase P3).');
-    process.exitCode = 2;
+  .description('Serve the console API (and the console build if present) without running anything')
+  .option('--port <n>', 'port (default HANDSOFF_PORT or 4000)')
+  .option('--host <host>', 'bind address', '127.0.0.1')
+  .option('--data-dir <dir>', 'data directory (default HANDSOFF_DATA_DIR or ./data)')
+  .action(async (opts: { port?: string; host?: string; dataDir?: string }) => {
+    process.exitCode = await runServeCommand(opts);
   });
 
 function collect(value: string, previous: string[]): string[] {

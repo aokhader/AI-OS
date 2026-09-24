@@ -11,6 +11,7 @@
       "!**/dist",
       "!**/node_modules",
       "!data/runs",
+      "!data/capabilities",
       "!evidence",
       "!packages/core/schema"
     ]

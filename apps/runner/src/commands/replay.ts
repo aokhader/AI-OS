@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createFsStore, ReplayArgumentError, type ReplayResult, replay } from '@handsoff/core';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
 
@@ -11,8 +12,25 @@ export interface ReplayCommandOptions {
   dataDir?: string | undefined;
 }
 
+/**
+ * Loads `.env` if present. Node keeps the last occurrence of a key, so a key that is set once and
+ * then repeated empty (the template lists every key blank) silently ends up empty; warn about it.
+ */
 export function loadEnv(): void {
   try {
+    const seen = new Map<string, boolean>();
+    for (const line of readFileSync('.env', 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!m?.[1]) continue;
+      const [, name, value = ''] = m;
+      const wasSet = seen.get(name);
+      if (wasSet !== undefined) {
+        console.error(
+          `warning: .env defines ${name} more than once; the last one wins${wasSet && value === '' ? ' and it is empty' : ''}`,
+        );
+      }
+      seen.set(name, value !== '');
+    }
     process.loadEnvFile('.env');
   } catch {
     // no .env: rely on the environment

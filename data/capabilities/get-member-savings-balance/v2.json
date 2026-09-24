@@ -1,0 +1,393 @@
+{
+  "schemaVersion": 1,
+  "id": "get-member-savings-balance",
+  "name": "Look up member {memberId} and return the current balance of the Savings account",
+  "description": "Look up member {memberId} and return the current balance of the Savings account",
+  "version": 2,
+  "supersedes": 1,
+  "status": "draft",
+  "provenance": {
+    "runId": "run_20260923_015357_b794",
+    "provider": "google",
+    "model": "gemini-3.8-flash",
+    "effort": "high",
+    "recordedAt": "2026-09-23T08:54:54.875Z",
+    "compiler": "handsoff@0.1.0"
+  },
+  "app": {
+    "vendorProductId": "acme-coreteller",
+    "surfaceKind": "legacy-web"
+  },
+  "entry": {
+    "route": "/",
+    "requiresAuth": true,
+    "preconditions": [
+      {
+        "id": "entry-ready",
+        "when": {
+          "textPresent": ["Member Lookup"],
+          "timeoutMs": 10000
+        },
+        "role": "precondition"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "memberId",
+      "type": "string",
+      "description": "Member number as printed on the member card",
+      "sensitivity": "sensitive",
+      "required": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "savingsBalance",
+      "type": "number",
+      "parser": "currency",
+      "description": "savingsBalance as read from the page when the goal was achieved",
+      "source": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Savings",
+            "relation": "same-row-column",
+            "column": "Balance"
+          },
+          {
+            "kind": "structural",
+            "path": "table[3] > tr[2] > td[3]"
+          }
+        ],
+        "framePath": ["main"]
+      },
+      "atStep": "s4",
+      "required": true,
+      "sensitivity": "sensitive"
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "intent": "Enter member ID into the search field",
+      "action": {
+        "kind": "type",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "labels",
+                "role": "textbox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+              }
+            ],
+            "framePath": ["main"]
+          }
+        },
+        "value": {
+          "param": "memberId"
+        },
+        "clear": true
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Member #",
+            "relation": "labels",
+            "role": "textbox"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+          }
+        ],
+        "framePath": ["main"]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s1-post",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "labels",
+                "role": "textbox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+              }
+            ],
+            "framePath": ["main"]
+          },
+          "timeoutMs": 5000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "memberId",
+          "field": "value",
+          "inferred": false
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s2",
+      "intent": "Click Search to look up the member",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "role",
+                "role": "button",
+                "name": "Search"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "labels",
+                "role": "button"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[3] > input[1]"
+              }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "role",
+            "role": "button",
+            "name": "Search"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "Member #",
+            "relation": "labels",
+            "role": "button"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[2] > td[3] > input[1]"
+          }
+        ],
+        "framePath": ["main"]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s2-post",
+        "when": {
+          "url": "/members/search",
+          "textPresent": ["Search Results"],
+          "timeoutMs": 10000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s3",
+      "intent": "Click View to open member details",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "role",
+                "role": "link",
+                "name": "View"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Active",
+                "relation": "labels",
+                "role": "link"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Alex Rivera",
+                "relation": "same-row-column",
+                "column": "Action",
+                "role": "link"
+              }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "role",
+            "role": "link",
+            "name": "View"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "Active",
+            "relation": "labels",
+            "role": "link"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "Alex Rivera",
+            "relation": "same-row-column",
+            "column": "Action",
+            "role": "link"
+          }
+        ],
+        "framePath": ["main"]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s3-post",
+        "when": {
+          "url": "/members/:memberId",
+          "textPresent": ["Member Detail"],
+          "timeoutMs": 10000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "memberId",
+          "field": "postcondition.url",
+          "inferred": true
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s4",
+      "intent": "Read savingsBalance",
+      "action": {
+        "kind": "extract",
+        "name": "savingsBalance",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Savings",
+                "relation": "same-row-column",
+                "column": "Balance"
+              },
+              {
+                "kind": "structural",
+                "path": "table[3] > tr[2] > td[3]"
+              }
+            ],
+            "framePath": ["main"]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Savings",
+            "relation": "same-row-column",
+            "column": "Balance"
+          },
+          {
+            "kind": "structural",
+            "path": "table[3] > tr[2] > td[3]"
+          }
+        ],
+        "framePath": ["main"]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s4-post",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Savings",
+                "relation": "same-row-column",
+                "column": "Balance"
+              },
+              {
+                "kind": "structural",
+                "path": "table[3] > tr[2] > td[3]"
+              }
+            ],
+            "framePath": ["main"]
+          },
+          "timeoutMs": 5000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    }
+  ],
+  "success": {
+    "id": "success",
+    "when": {
+      "url": "/members/:memberId",
+      "textPresent": ["Member Detail"]
+    },
+    "role": "postcondition"
+  },
+  "detectors": [
+    {
+      "id": "member-not-found",
+      "when": {
+        "textPresent": ["No matching member"]
+      },
+      "role": "detector",
+      "class": "outcome",
+      "code": "MEMBER_NOT_FOUND",
+      "terminal": true
+    }
+  ],
+  "policy": {
+    "requiredScopes": [],
+    "riskySteps": []
+  }
+}

@@ -45,6 +45,7 @@ Rules:
 | D-029 | Discovered outputs default to sensitive; anchors never contain parameter values | accepted |
 | D-030 | Planner protocol in core, adapters translate wire formats only | accepted |
 | D-031 | Provider-selectable discovery with an OpenAI-compatible adapter | accepted |
+| D-032 | A table row keyed by a parameter value contributes no anchors | accepted |
 
 ---
 
@@ -326,3 +327,12 @@ Date: 2026-09-22 · Status: accepted
 - **Alternatives.** A native Gemini adapter over `@google/genai`. One adapter per vendor. A third-party abstraction layer over many providers.
 - **Why.** The developer has no Anthropic API credit and the brief's one real run must happen; Google AI Studio's free tier is the cheapest way to get it. The chat completions protocol is what most hosted and local endpoints implement, so one adapter with presets covers them all, and Google documents function calling, image input and `reasoning_effort` on its compatible endpoint. An abstraction library would hide exactly the stop-reason and tool-call handling the design makes explicit ([D-022](#d-022--manual-tool-use-loop-on-sdk-types-not-the-beta-tool-runner)).
 - **Consequences.** Tools are not `strict` on the compatible adapter; the zod validation on the way back is the check. Screenshots travel in a user message after the tool result because tool messages cannot carry images. Presets default images and effort off for endpoints that often reject them, and the planner drops either on a 400 that names it. Provenance records which provider served a run, so evidence from a Gemini run is labelled as such. [D-004](#d-004--anthropic-claude-behind-a-thin-planner-interface) is extended, not reversed.
+
+## D-032 · A table row keyed by a parameter value contributes no anchors
+
+Date: 2026-09-23 · Status: accepted
+
+- **Decision.** When target derivation finds a table row in which some cell is exactly a parameter value, none of that row's cells may serve as an anchor for a target in the row, whatever relation would have used them. The target keeps its role strategy, if any, and the structural path. Whole-cell equality only, as for URL bindings.
+- **Alternatives.** Keep rejecting only cells that look like money, dates or ids (D-029). Add a personal-name heuristic. Parameterise the anchor as `{ param }` so the row is found by the member number at replay.
+- **Why.** The first real discovery run (Gemini, 2026-09-23) anchored the results row's `View` link on the member's name and status. `looksLikeData` cannot tell a name from a label, and a name heuristic would reject legitimate labels such as `Money Market`. The row being selected by the parameter is the reliable signal that its cells describe one entity. A parameterised anchor is the right long-term answer for multi-row results and is a schema change; it is deferred until a flow needs it.
+- **Consequences.** Search-hit rows resolve by role plus structure, so a results table with several hits will report drift rather than pick a row by someone's name. Rows whose cells merely contain the value (an account number such as `10001-S01`) are unaffected, so the accounts table still anchors on `Savings`.

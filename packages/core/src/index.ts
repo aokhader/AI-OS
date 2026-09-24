@@ -1,3 +1,4 @@
+export * from './api/console.js';
 export * from './compile/compile.js';
 export * from './compile/derive-postcondition.js';
 export * from './compile/derive-target.js';

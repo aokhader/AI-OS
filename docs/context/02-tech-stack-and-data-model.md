@@ -30,6 +30,8 @@ Root scripts (to be created in P0):
 | `pnpm handsoff discover --goal "…" --param memberId=10001 --target acme-coreteller` | One discovery run (`tsx apps/runner/src/cli.ts`) | P2 |
 | `pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001` | One replay | P1 |
 | `pnpm handsoff replay … --chaos session-expiry` | Replay with an injected condition | P4 |
+| `pnpm serve` | `handsoff serve`: the console's read API on `:4000`, plus the console build when present | P3 |
+| `pnpm console` | Vite dev server for the console on `:5173`, proxying `/api` to `:4000` | P3 |
 | `pnpm test` | Unit tests, no browser, no API key | P0 |
 | `pnpm test:integration` | Playwright tests against the mock app, headless, no API key | P1 |
 | `pnpm typecheck`, `pnpm lint`, `pnpm format` | `tsc --noEmit` per package; Biome check; Biome format | P0 |

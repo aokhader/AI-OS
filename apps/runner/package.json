@@ -11,11 +11,13 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.4",
     "@handsoff/core": "workspace:*",
     "@handsoff/llm-anthropic": "workspace:*",
     "@handsoff/llm-openai": "workspace:*",
     "@handsoff/surface-playwright": "workspace:*",
-    "commander": "^14.0.0"
+    "commander": "^14.0.0",
+    "fastify": "^5.12.5"
   },
   "devDependencies": {
     "@handsoff/legacy-bank": "workspace:*",

@@ -11,6 +11,8 @@
   "scripts": {
     "dev": "pnpm --filter @handsoff/legacy-bank dev",
     "handsoff": "tsx apps/runner/src/cli.ts",
+    "serve": "tsx apps/runner/src/cli.ts serve",
+    "console": "pnpm --filter @handsoff/operator-console dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",

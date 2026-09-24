@@ -1,9 +1,11 @@
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// The runner embeds the API and WebSocket on :4000 (docs/context/01-architecture.md §2).
+// The runner serves the API (and the built console) on :4000 (docs/context/01-architecture.md §2).
+// In development Vite runs here on :5173 and proxies the API and the WebSocket to it.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
     proxy: {

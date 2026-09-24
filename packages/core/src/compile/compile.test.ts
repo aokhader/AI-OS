@@ -137,6 +137,10 @@ describe('deriveTargetSpec', () => {
     const text = JSON.stringify(spec);
     expect(text).not.toContain('10001');
     expect(spec.strategies[0]).toEqual({ kind: 'role', role: 'link', name: 'View' });
+    // The row is keyed by the parameter: its name and status cells are data, not anchors (D-032).
+    expect(text).not.toContain('Alex Rivera');
+    expect(text).not.toContain('Active');
+    expect(spec.strategies.map((s) => s.kind)).toEqual(['role', 'structural']);
     const balance = deriveTargetSpec(detailNodes[7]!, detailNodes, ['10001']);
     expect(balance.strategies[0]).toEqual({
       kind: 'anchored',
@@ -145,6 +149,15 @@ describe('deriveTargetSpec', () => {
       column: 'Balance',
     });
     expect(balance.strategies.some((s) => s.kind === 'role')).toBe(false);
+  });
+
+  it('still anchors rows whose cells merely contain a parameter value', () => {
+    // 10001-S01 is an account number, not the member number itself, so the row is not keyed.
+    const balance = deriveTargetSpec(detailNodes[7]!, detailNodes, ['10001']);
+    expect(balance.strategies[0]?.kind).toBe('anchored');
+    const keyed = detailNodes.map((n) => (n.ref === 'd7' ? { ...n, name: '10001' } : n));
+    const spec = deriveTargetSpec(keyed[7]!, keyed, ['10001']);
+    expect(spec.strategies.map((s) => s.kind)).toEqual(['structural']);
   });
 });
 

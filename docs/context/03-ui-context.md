@@ -1,6 +1,6 @@
 # 03 · UI Context (Operator Console)
 
-Status: draft · Last updated: 2026-09-21
+Status: draft · Last updated: 2026-09-23
 
 Skeleton. The heading structure is final; each section says what belongs there and carries a `TODO` until it is written. The console is web-only ([D-005](08-decision-log.md#d-005--web-only-operator-console-vite--react-no-mobile)) and is context plus controls; the headed browser window is where the operator actually works ([D-012](08-decision-log.md#d-012--handoff-via-the-headed-browser-with-captured-human-actions-no-screencast)).
 
@@ -23,7 +23,9 @@ Routes and what each shows:
 | `/capabilities` | Capabilities | id, name, latest version, status, last replay result |
 | `/capabilities/:id` | Capability detail | inputs, outputs, steps with targets and risk, detectors, versions, approve toggle, replay form |
 
-TODO: wireframe-level description of each screen.
+Built in P3: `/runs`, `/runs/:id`, `/capabilities`, `/capabilities/:id` and `/capabilities/:id/v/:version` over the read API in `apps/runner/src/server/api.ts` (`/api/runs`, `/api/runs/:id`, `/api/run-files/:id/*`, `/api/capabilities`, `/api/capabilities/:id[/v/:version]`). The wire types are `RunListItem`, `RunDetail`, `CapabilityListItem` and `CapabilityDetail` in core, the only thing the console imports from the workspace. Run detail groups the event log by step and shows each observation's screenshot inline; capability detail lists every locator strategy of every step in resolution order. `/escalations` is a placeholder until P6.
+
+TODO: wireframe-level description of the escalation screens.
 
 ## 3. Handoff interaction model
 
@@ -34,6 +36,8 @@ TODO
 ## 4. Real-time data flow
 
 WebSocket event stream from the runner → TanStack Query cache invalidation per run id. Which events refresh which screens. Fallback to polling when the socket drops. No client-side state beyond the query cache and the route.
+
+P3 uses polling only: the runs list refetches every 5 s and an unfinished run every 3 s. The socket arrives with escalations in P6.
 
 TODO
 

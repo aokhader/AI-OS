@@ -38,6 +38,22 @@ function firstNamedCellInRow(
   return undefined;
 }
 
+/**
+ * True when a cell of the row is exactly a parameter value. Such a row belongs to the entity the
+ * parameter selected (a search hit, an account line), so its other cells are that entity's data,
+ * never labels: a name or status recorded there would leak into the artifact and break on the
+ * next invocation (D-032). Whole-cell equality only, as for URL bindings (D-013).
+ */
+function rowKeyedByParam(nodes: A11yNode[], rowPath: string, paramValues: string[]): boolean {
+  for (let c = 1; c <= 12; c++) {
+    const cell = cellAt(nodes, rowPath, c);
+    if (!cell) break;
+    const text = cell.name.trim();
+    if (text !== '' && paramValues.some((v) => v.length >= 3 && v === text)) return true;
+  }
+  return false;
+}
+
 function nearestTextLeft(nodes: A11yNode[], node: A11yNode, avoid: string[]): A11yNode | undefined {
   const b = node.bbox;
   const candidates = nodes.filter(
@@ -59,7 +75,8 @@ function nearestTextLeft(nodes: A11yNode[], node: A11yNode, avoid: string[]): A1
  * Proposes locator strategies for a node from what surrounds it, keeps only those that resolve
  * uniquely to that node, and returns at most three in the ranking of §8: role, anchored,
  * structural. Anchors and names that contain a parameter value are never used, so an artifact
- * cannot leak the values it was recorded with (D-013).
+ * cannot leak the values it was recorded with (D-013), and a table row keyed by a parameter value
+ * contributes no anchors at all (D-032).
  */
 export function deriveTargetSpec(
   node: A11yNode,
@@ -75,7 +92,8 @@ export function deriveTargetSpec(
   }
 
   const pos = cellPosition(node.path);
-  if (pos) {
+  const keyedRow = pos ? rowKeyedByParam(frameNodes, pos.rowPath, paramValues) : false;
+  if (pos && !keyedRow) {
     if (interactive) {
       for (let c = pos.col - 1; c >= 1; c--) {
         const cell = cellAt(frameNodes, pos.rowPath, c);
@@ -112,7 +130,7 @@ export function deriveTargetSpec(
     }
   }
 
-  if (interactive && !proposals.some((p) => p.kind === 'anchored')) {
+  if (interactive && !keyedRow && !proposals.some((p) => p.kind === 'anchored')) {
     const left = nearestTextLeft(frameNodes, node, paramValues);
     if (left) {
       proposals.push({
