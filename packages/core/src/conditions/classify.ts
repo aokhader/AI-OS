@@ -3,11 +3,13 @@ import { describePredicate, evaluatePredicate, type ObservationView } from './pr
 
 /**
  * The one ordered classifier (D-014). Precedence, highest first:
- *   1. session-level and fatal detectors (rebootstrap recoveries, fail-class error pages)
- *   2. known interstitials (dismiss and wait-retry recoveries)
- *   3. business outcomes, limited to their atSteps
- *   4. escalate-class detectors
- *   5. the step's postcondition
+ *   1. session-level detectors (rebootstrap recoveries): a sign-in page that also says "error"
+ *      is a session expiry
+ *   2. fatal detectors (fail-class error pages)
+ *   3. known interstitials (dismiss and wait-retry recoveries)
+ *   4. business outcomes, limited to their atSteps
+ *   5. escalate-class detectors
+ *   6. the step's postcondition
  * Budgets are enforced by the engine, which decides whether a `recover` is still allowed.
  */
 export type Classification =
@@ -38,12 +40,12 @@ function applies(d: Condition, stepId: string | undefined): boolean {
 }
 
 function rank(d: Condition): number {
-  if (d.class === 'fail') return 0;
   if (d.class === 'recover' && d.recovery?.kind === 'rebootstrap') return 0;
-  if (d.class === 'recover') return 1;
-  if (d.class === 'outcome') return 2;
-  if (d.class === 'escalate') return 3;
-  return 4;
+  if (d.class === 'fail') return 1;
+  if (d.class === 'recover') return 2;
+  if (d.class === 'outcome') return 3;
+  if (d.class === 'escalate') return 4;
+  return 5;
 }
 
 export function classify(obs: ObservationView, input: ClassifyInput): Classification {

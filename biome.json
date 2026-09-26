@@ -12,6 +12,7 @@
       "!**/node_modules",
       "!data/runs",
       "!data/capabilities",
+      "!packages/core/src/conditions/fixtures",
       "!evidence",
       "!packages/core/schema"
     ]

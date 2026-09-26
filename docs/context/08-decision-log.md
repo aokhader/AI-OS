@@ -1,6 +1,6 @@
 # 08 · Decision Log
 
-Status: stable · Last updated: 2026-09-22
+Status: stable · Last updated: 2026-09-25
 
 Lightweight architecture decision records. One entry per decision that shapes the system. The brief (§4, §5, §7) says every decision must be defended; this log is where the defence lives, and `/REPORT.md` will be distilled from it.
 
@@ -46,6 +46,7 @@ Rules:
 | D-030 | Planner protocol in core, adapters translate wire formats only | accepted |
 | D-031 | Provider-selectable discovery with an OpenAI-compatible adapter | accepted |
 | D-032 | A table row keyed by a parameter value contributes no anchors | accepted |
+| D-033 | Re-bootstrap re-runs the flow from its entry and detectors are evaluated inside waits | accepted |
 
 ---
 
@@ -336,3 +337,12 @@ Date: 2026-09-23 · Status: accepted
 - **Alternatives.** Keep rejecting only cells that look like money, dates or ids (D-029). Add a personal-name heuristic. Parameterise the anchor as `{ param }` so the row is found by the member number at replay.
 - **Why.** The first real discovery run (Gemini, 2026-09-23) anchored the results row's `View` link on the member's name and status. `looksLikeData` cannot tell a name from a label, and a name heuristic would reject legitimate labels such as `Money Market`. The row being selected by the parameter is the reliable signal that its cells describe one entity. A parameterised anchor is the right long-term answer for multi-row results and is a schema change; it is deferred until a flow needs it.
 - **Consequences.** Search-hit rows resolve by role plus structure, so a results table with several hits will report drift rather than pick a row by someone's name. Rows whose cells merely contain the value (an account number such as `10001-S01`) are unaffected, so the accounts table still anchors on `Savings`.
+
+## D-033 · Re-bootstrap re-runs the flow from its entry and detectors are evaluated inside waits
+
+Date: 2026-09-25 · Status: accepted
+
+- **Decision.** When a session-level detector matches (the sign-in page is back), the engine signs in again through the app profile's bootstrap routine and then re-runs the capability from its entry route, all steps included, with each step's `attempts` counting up. It refuses when a risky step has already executed and fails with `sideEffects: possible`. Detectors are evaluated on every poll of every wait (preconditions, postconditions, bootstrap success, capability success), not only after a step: `dismiss` and `wait-retry` recoveries run inside the wait and the wait continues, session-level ones raise the re-bootstrap, terminal ones end the wait with a verdict. Budgets stay as designed: two recoveries per step, one re-bootstrap per run, from `policy.budgets`.
+- **Alternatives.** Re-verify only the previous step's postcondition and continue from there (01 §9 as first written). Navigate straight to the last checkpoint's URL. Evaluate detectors only after each step.
+- **Why.** In a stateless legacy app the state that matters lives in the server session and the current page, and both are gone after an expiry. The steps of a read-only flow are idempotent by definition, so re-running them is the only resume that needs no per-app knowledge; a checkpoint-scan resume that jumps to a step's URL is what P6 needs for hand-back and will be layered on top. Detectors inside waits matter because that is where the conditions actually appear: a postcondition wait would otherwise sit out its whole timeout on a sign-in page or an error page before anything looked at it, and a native dialog would block the wait entirely.
+- **Consequences.** `stepsRun[].attempts` is meaningful; the session-expiry evidence shows `s1` and `s2` at two attempts. `waitFor` returns a `verdict` the caller raises. The mock app's chaos state lives in its own cookie so that a fired mode survives the session being cleared, otherwise the re-run would expire again and exhaust the budget.

@@ -25,6 +25,8 @@ export function canonicalizePath(
         return `:${name}`;
       }
     }
+    // A segment the app generated (a confirmation or record number) differs on every run.
+    if (/\d/.test(decoded) && looksLikeData(decoded)) return '*';
     return seg;
   });
   return { pattern: segments.join('/') || '/', params };

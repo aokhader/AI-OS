@@ -189,7 +189,7 @@ Two capabilities are recorded and replayed:
 | Capability | Inputs | Outputs | Path through the app | Risky | Outcomes exercised |
 |---|---|---|---|---|---|
 | `get-member-savings-balance` | `memberId` (sensitive) | `savingsBalance` (currency, sensitive) | Member search → member detail → read the Savings row of the accounts table | No | `MEMBER_NOT_FOUND` |
-| `open-sub-account` | `memberId` (sensitive), `accountType` | `confirmationNumber` | Member search → member detail → Open sub-account → choose type → submit → confirmation screen | Yes, the submit step carries `confirm: operator` | `MEMBER_NOT_FOUND`, `VALIDATION_REJECTED` |
+| `open-sub-account` | `memberId` (sensitive), `accountType`, `deposit` | `confirmationNumber` | Member search → member detail → Open sub-account → choose type → enter deposit → submit → confirmation screen | Yes, the submit step carries `confirm: operator` (from P5) | `MEMBER_NOT_FOUND`, `VALIDATION_REJECTED` |
 
 Injectable runtime conditions in the mock app, each mapped to a condition class:
 
@@ -197,10 +197,10 @@ Injectable runtime conditions in the mock app, each mapped to a condition class:
 |---|---|---|---|
 | Member not found | Search for `99999` | `outcome` | Stops, returns `MEMBER_NOT_FOUND` |
 | Validation error | Submit with an invalid account type | `outcome` | Stops, returns `VALIDATION_REJECTED` with the page's message |
-| Session expiry | Short cookie lifetime via chaos switch | `recover` | Re-runs the bootstrap routine once, re-verifies the previous checkpoint, continues |
-| Unexpected interstitial | "System notice" modal injected on page load | `recover` | Dismisses it, re-checks the step |
-| Slow load (optional) | Delay middleware | `recover` | Waits within the step timeout, then retries once |
-| Server error page (optional) | Forced 500 | `fail` | Stops with `APP_ERROR` and the page evidence |
+| Session expiry | Chaos switch clears the session on the next search | `recover` | Signs in again once, re-runs the flow from its entry, continues |
+| Unexpected interstitial | Native "System notice" alert on the next results page | `recover` | Dismisses it, re-checks the step |
+| Slow load (optional) | "System is busy" page that refreshes itself | `recover` | Waits and re-checks up to three times |
+| Server error page (optional) | Forced 500 on the next search | `fail` | Stops with `APP_ERROR` and the page evidence |
 | Stuck / unknown state | Anything the classifier cannot name | `escalate` | Raises an intervention request |
 
 Evidence produced for the submission: one real discovery run, one successful replay, one `MEMBER_NOT_FOUND` replay, one escalation with handoff, one cross-variant replay, and the capability JSON.

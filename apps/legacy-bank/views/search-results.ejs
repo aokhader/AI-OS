@@ -1,4 +1,7 @@
 <%- include('partials/head') %>
+<% if (interstitial) { %>
+<script type="text/javascript">alert("System notice: scheduled maintenance tonight from 22:00 to 23:00. Some functions may be unavailable. Click OK to continue.");</script>
+<% } %>
 <br>
 <div class="ttl"><%= labels.searchResults %></div>
 <% if (member) { %>

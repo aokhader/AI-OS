@@ -12,7 +12,7 @@ Deliberately hostile to automation, because that is the environment the brief de
 
 Flows: sign in → Member Lookup → Search Results → Member Detail (accounts table) → Open Sub-Account → Confirmation.
 
-Runtime conditions the replay engine must handle (chaos injection arrives in P4; the natural ones exist now): unknown member number shows "No matching member"; invalid sub-account form shows "Please correct the errors below."; an expired session shows "Your session has expired".
+Runtime conditions the replay engine must handle. The natural ones: an unknown member number shows "No matching member"; an invalid sub-account form shows "Please correct the errors below."; an expired session shows "Your session has expired". The injected ones (D-024): send `x-handsoff-chaos: <mode>[,<mode>]` and each armed mode fires once per browser on the request it targets, remembered in the `coreteller_chaos` cookie. `not-found`, `session-expiry`, `interstitial` (native `alert()` on the results page), `slow` (a busy page that refreshes to the results) and `error` (a 500 page) target the next member search; `validation` rejects the next otherwise valid sub-account submit. Honoured only when `LEGACY_BANK_ALLOW_CHAOS_HEADER` is not `false`.
 
 Do not add ids, labels or test hooks to make automation easier. That defeats the point.
 

@@ -1,15 +1,7 @@
-import { classify } from '../conditions/classify.js';
 import { describePredicate, matchUrl } from '../conditions/predicate.js';
 import type { ParamValues, SurfaceObservation } from '../ports/surface.js';
 import { resolveTarget } from '../resolve/resolve-target.js';
-import type {
-  Capability,
-  Condition,
-  FailureKind,
-  Recovery,
-  ReplayResult,
-  Run,
-} from '../schema/index.js';
+import type { Capability, Condition, FailureKind, ReplayResult, Run } from '../schema/index.js';
 import { newRunId } from '../store/run-id.js';
 import {
   credentialsFromEnv,
@@ -17,6 +9,7 @@ import {
   EngineBase,
   type EngineDeps,
   type EngineTimeouts,
+  RebootstrapSignal,
   Stop,
 } from './base.js';
 import { parseOutput } from './parsers.js';
@@ -66,7 +59,6 @@ export async function replay(options: ReplayOptions, deps: ReplayDeps): Promise<
 
 class ReplayEngine extends EngineBase {
   private readonly detectors: Condition[];
-  private readonly recoveries: Recovery[] = [];
 
   constructor(
     private readonly options: ReplayOptions,
@@ -103,26 +95,19 @@ class ReplayEngine extends EngineBase {
     let result: ReplayResult;
     try {
       if (capability.entry.requiresAuth) await this.bootstrap();
-      await this.enter();
-      for (const step of capability.steps) {
-        this.checkRunTimeout();
-        await this.runStep(step, params, this.detectors, false);
-        await this.extractOutputsAt(step.id);
+      // A session-level condition anywhere in the flow signs in again and restarts the flow from
+      // its entry (D-033); the budget and the risky-step guard live in rebootstrap().
+      let outputs: Record<string, unknown>;
+      for (;;) {
+        try {
+          await this.enter();
+          outputs = await this.flow();
+          break;
+        } catch (err) {
+          if (!(err instanceof RebootstrapSignal)) throw err;
+          await this.rebootstrap(err);
+        }
       }
-      this.currentStep = undefined;
-      const success = await this.waitFor(capability.success, this.stepTimeoutMs, 'success');
-      if (!success.matched) {
-        throw new Stop(
-          {
-            kind: 'failure',
-            failure: 'CHECKPOINT_FAILED',
-            expected: describePredicate(capability.success.when),
-            observed: success.detail,
-          },
-          'success',
-        );
-      }
-      const outputs = this.finalizeOutputs(success.obs);
       result = this.build({ status: 'success', outputs }, undefined);
     } catch (err) {
       if (err instanceof Stop) {
@@ -157,9 +142,18 @@ class ReplayEngine extends EngineBase {
     this.currentStep = 'entry';
     await this.navigate(substituteRoute(capability.entry.route, params), 'entry');
     for (const pre of capability.entry.preconditions) {
-      const w = await this.waitFor(pre, pre.when.timeoutMs ?? this.stepTimeoutMs, 'entry');
+      const w = await this.waitFor(
+        pre,
+        pre.when.timeoutMs ?? this.stepTimeoutMs,
+        'entry',
+        this.detectors,
+      );
+      if (w.verdict) {
+        await this.snapshot('entry', w.obs);
+        this.raise(w.verdict, 'entry');
+      }
       if (!w.matched) {
-        this.raise(classify(w.obs, { stepId: 'entry', detectors: this.detectors }), 'entry');
+        await this.snapshot('entry', w.obs);
         throw new Stop(
           {
             kind: 'failure',
@@ -171,6 +165,39 @@ class ReplayEngine extends EngineBase {
         );
       }
     }
+  }
+
+  /** The compiled steps, the success condition and the outputs. */
+  private async flow(): Promise<Record<string, unknown>> {
+    const { capability, params } = this.options;
+    for (const step of capability.steps) {
+      this.checkRunTimeout();
+      await this.runStep(step, params, this.detectors, false);
+      await this.extractOutputsAt(step.id);
+    }
+    this.currentStep = undefined;
+    const success = await this.waitFor(
+      capability.success,
+      this.stepTimeoutMs,
+      'success',
+      this.detectors,
+    );
+    if (success.verdict) {
+      await this.snapshot('success', success.obs);
+      this.raise(success.verdict, 'success');
+    }
+    if (!success.matched) {
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'CHECKPOINT_FAILED',
+          expected: describePredicate(capability.success.when),
+          observed: success.detail,
+        },
+        'success',
+      );
+    }
+    return this.finalizeOutputs(success.obs);
   }
 
   // ---- outputs -------------------------------------------------------------------------------

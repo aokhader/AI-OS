@@ -109,6 +109,10 @@ describe('looksLikeData', () => {
     for (const t of ['Member #', 'Search', 'Savings', 'View'])
       expect(looksLikeData(t), t).toBe(false);
   });
+
+  it('treats bare punctuation such as a | separator as data, never as an anchor', () => {
+    for (const t of ['|', '\u00a0|\u00a0', '—', '--', '*']) expect(looksLikeData(t), t).toBe(true);
+  });
 });
 
 describe('deriveTargetSpec', () => {
@@ -149,6 +153,36 @@ describe('deriveTargetSpec', () => {
       column: 'Balance',
     });
     expect(balance.strategies.some((s) => s.kind === 'role')).toBe(false);
+  });
+
+  it('anchors a value cell of a key/value table on the label beside it', () => {
+    const nodes: A11yNode[] = [
+      node('k1', 'cell', 'Confirmation number', 'table[2]/tr[1]/td[1]', [8, 100, 140, 20]),
+      node('k2', 'cell', 'C-480221', 'table[2]/tr[1]/td[2]', [150, 100, 100, 20]),
+      node('k3', 'cell', 'Account number', 'table[2]/tr[2]/td[1]', [8, 122, 140, 20]),
+      node('k4', 'cell', '10001-M01', 'table[2]/tr[2]/td[2]', [150, 122, 100, 20]),
+    ];
+    const spec = deriveTargetSpec(nodes[1]!, nodes, ['10001']);
+    expect(spec.strategies[0]).toEqual({
+      kind: 'anchored',
+      anchor: 'Confirmation number',
+      relation: 'right-of',
+      role: 'cell',
+    });
+    expect(spec.strategies.at(-1)?.kind).toBe('structural');
+  });
+
+  it('does not use a single-row table as its own header row', () => {
+    const nodes: A11yNode[] = [
+      node('l0', 'cell', '', 'table[4]/tr[1]/td[1]', [8, 300, 120, 20]),
+      node('l1', 'link', 'Open sub-account', 'table[4]/tr[1]/td[1]/a[1]', [8, 300, 110, 16]),
+      node('l2', 'cell', '|', 'table[4]/tr[1]/td[2]', [130, 300, 20, 20]),
+      node('l3', 'cell', '', 'table[4]/tr[1]/td[3]', [152, 300, 100, 20]),
+      node('l4', 'link', 'New search', 'table[4]/tr[1]/td[3]/a[1]', [152, 300, 80, 16]),
+    ];
+    const spec = deriveTargetSpec(nodes[1]!, nodes, []);
+    expect(JSON.stringify(spec)).not.toContain('"|"');
+    expect(spec.strategies.map((s) => s.kind)).toEqual(['role', 'structural']);
   });
 
   it('still anchors rows whose cells merely contain a parameter value', () => {

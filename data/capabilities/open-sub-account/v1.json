@@ -1,0 +1,768 @@
+{
+  "schemaVersion": 1,
+  "id": "open-sub-account",
+  "name": "Open a sub-account for a member",
+  "description": "Open a new sub-account of type {accountType} with an initial deposit of {deposit} for member {memberId} and return the confirmation number",
+  "version": 1,
+  "status": "draft",
+  "provenance": {
+    "runId": "run_20260925_032300_68ff",
+    "provider": "google",
+    "model": "gemini-3.5-flash-lite",
+    "effort": "high",
+    "recordedAt": "2026-09-25T10:24:31.559Z",
+    "compiler": "handsoff@0.1.0"
+  },
+  "app": {
+    "vendorProductId": "acme-coreteller",
+    "surfaceKind": "legacy-web"
+  },
+  "entry": {
+    "route": "/",
+    "requiresAuth": true,
+    "preconditions": [
+      {
+        "id": "entry-ready",
+        "when": {
+          "textPresent": [
+            "Member Lookup"
+          ],
+          "timeoutMs": 10000
+        },
+        "role": "precondition"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "name": "memberId",
+      "type": "string",
+      "description": "Member number as printed on the member card",
+      "sensitivity": "sensitive",
+      "required": true
+    },
+    {
+      "name": "accountType",
+      "type": "string",
+      "description": "Type of sub-account to open: Savings, Checking, Money Market or Certificate",
+      "sensitivity": "internal",
+      "required": true
+    },
+    {
+      "name": "deposit",
+      "type": "string",
+      "description": "Initial deposit in dollars, for example 25.00",
+      "sensitivity": "internal",
+      "required": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "confirmationNumber",
+      "type": "string",
+      "description": "confirmationNumber as read from the page when the goal was achieved",
+      "source": {
+        "strategies": [
+          {
+            "kind": "structural",
+            "path": "table[2] > tr[1] > td[2]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "atStep": "s8",
+      "required": true,
+      "sensitivity": "sensitive"
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "intent": "Enter memberId to lookup member",
+      "action": {
+        "kind": "type",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "labels",
+                "role": "textbox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        },
+        "value": {
+          "param": "memberId"
+        },
+        "clear": true
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Member #",
+            "relation": "labels",
+            "role": "textbox"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s1-post",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "labels",
+                "role": "textbox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          },
+          "timeoutMs": 5000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "memberId",
+          "field": "value",
+          "inferred": false
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s2",
+      "intent": "Click Search to lookup member",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "role",
+                "role": "button",
+                "name": "Search"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Member #",
+                "relation": "labels",
+                "role": "button"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[3] > input[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "role",
+            "role": "button",
+            "name": "Search"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "Member #",
+            "relation": "labels",
+            "role": "button"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[2] > td[3] > input[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s2-post",
+        "when": {
+          "url": "/members/search",
+          "textPresent": [
+            "Search Results"
+          ],
+          "timeoutMs": 10000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s3",
+      "intent": "Click View to open member profile",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "role",
+                "role": "link",
+                "name": "View"
+              },
+              {
+                "kind": "structural",
+                "path": "table[2] > tr[2] > td[4] > a[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "role",
+            "role": "link",
+            "name": "View"
+          },
+          {
+            "kind": "structural",
+            "path": "table[2] > tr[2] > td[4] > a[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s3-post",
+        "when": {
+          "url": "/members/:memberId",
+          "textPresent": [
+            "Member Detail"
+          ],
+          "timeoutMs": 10000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "memberId",
+          "field": "postcondition.url",
+          "inferred": true
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s4",
+      "intent": "Click Open sub-account link",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "role",
+                "role": "link",
+                "name": "Open sub-account"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "|",
+                "relation": "same-row-column",
+                "column": "Open sub-account",
+                "role": "link"
+              },
+              {
+                "kind": "structural",
+                "path": "table[4] > tr[1] > td[1] > a[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "role",
+            "role": "link",
+            "name": "Open sub-account"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "|",
+            "relation": "same-row-column",
+            "column": "Open sub-account",
+            "role": "link"
+          },
+          {
+            "kind": "structural",
+            "path": "table[4] > tr[1] > td[1] > a[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s4-post",
+        "when": {
+          "url": "/members/:memberId/accounts/open",
+          "textPresent": [
+            "Account type"
+          ],
+          "timeoutMs": 10000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "memberId",
+          "field": "postcondition.url",
+          "inferred": true
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s5",
+      "intent": "Select account type from parameter",
+      "action": {
+        "kind": "select",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Account type",
+                "relation": "labels",
+                "role": "combobox"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Account type",
+                "relation": "same-row-column",
+                "column": "-- select -- Savings Checking Money Market Certificate",
+                "role": "combobox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[1] > td[2] > select[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        },
+        "value": {
+          "param": "accountType"
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Account type",
+            "relation": "labels",
+            "role": "combobox"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "Account type",
+            "relation": "same-row-column",
+            "column": "-- select -- Savings Checking Money Market Certificate",
+            "role": "combobox"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[1] > td[2] > select[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s5-post",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Account type",
+                "relation": "labels",
+                "role": "combobox"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Account type",
+                "relation": "same-row-column",
+                "column": "-- select -- Savings Checking Money Market Certificate",
+                "role": "combobox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[1] > td[2] > select[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          },
+          "timeoutMs": 5000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "accountType",
+          "field": "value",
+          "inferred": false
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s6",
+      "intent": "Enter deposit amount from parameter",
+      "action": {
+        "kind": "type",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Initial deposit",
+                "relation": "labels",
+                "role": "textbox"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Initial deposit",
+                "relation": "same-row-column",
+                "column": "-- select -- Savings Checking Money Market Certificate",
+                "role": "textbox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        },
+        "value": {
+          "param": "deposit"
+        },
+        "clear": true
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Initial deposit",
+            "relation": "labels",
+            "role": "textbox"
+          },
+          {
+            "kind": "anchored",
+            "anchor": "Initial deposit",
+            "relation": "same-row-column",
+            "column": "-- select -- Savings Checking Money Market Certificate",
+            "role": "textbox"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s6-post",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "anchored",
+                "anchor": "Initial deposit",
+                "relation": "labels",
+                "role": "textbox"
+              },
+              {
+                "kind": "anchored",
+                "anchor": "Initial deposit",
+                "relation": "same-row-column",
+                "column": "-- select -- Savings Checking Money Market Certificate",
+                "role": "textbox"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[2] > td[2] > input[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          },
+          "timeoutMs": 5000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "deposit",
+          "field": "value",
+          "inferred": false
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s7",
+      "intent": "Click Open Account button",
+      "action": {
+        "kind": "click",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "role",
+                "role": "button",
+                "name": "Open Account"
+              },
+              {
+                "kind": "structural",
+                "path": "form[1] > table[1] > tr[3] > td[2] > input[1]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "role",
+            "role": "button",
+            "name": "Open Account"
+          },
+          {
+            "kind": "structural",
+            "path": "form[1] > table[1] > tr[3] > td[2] > input[1]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s7-post",
+        "when": {
+          "url": "/members/:memberId/confirmation/*",
+          "textPresent": [
+            "Confirmation"
+          ],
+          "timeoutMs": 10000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [
+        {
+          "param": "memberId",
+          "field": "postcondition.url",
+          "inferred": true
+        }
+      ],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    },
+    {
+      "id": "s8",
+      "intent": "Read confirmationNumber",
+      "action": {
+        "kind": "extract",
+        "name": "confirmationNumber",
+        "target": {
+          "spec": {
+            "strategies": [
+              {
+                "kind": "structural",
+                "path": "table[2] > tr[1] > td[2]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          }
+        }
+      },
+      "target": {
+        "strategies": [
+          {
+            "kind": "structural",
+            "path": "table[2] > tr[1] > td[2]"
+          }
+        ],
+        "framePath": [
+          "main"
+        ]
+      },
+      "preconditions": [],
+      "postcondition": {
+        "id": "s8-post",
+        "when": {
+          "element": {
+            "strategies": [
+              {
+                "kind": "structural",
+                "path": "table[2] > tr[1] > td[2]"
+              }
+            ],
+            "framePath": [
+              "main"
+            ]
+          },
+          "timeoutMs": 5000
+        },
+        "role": "postcondition"
+      },
+      "risk": "safe",
+      "confirm": "none",
+      "bindings": [],
+      "baseline": {
+        "resolvedBy": 0,
+        "candidateCount": 1
+      },
+      "recordedBy": "automation"
+    }
+  ],
+  "success": {
+    "id": "success",
+    "when": {
+      "url": "/members/:memberId/confirmation/*",
+      "textPresent": [
+        "Confirmation"
+      ]
+    },
+    "role": "postcondition"
+  },
+  "detectors": [
+    {
+      "id": "member-not-found",
+      "when": {
+        "textPresent": [
+          "No matching member"
+        ]
+      },
+      "role": "detector",
+      "class": "outcome",
+      "code": "MEMBER_NOT_FOUND",
+      "terminal": true
+    },
+    {
+      "id": "validation-rejected",
+      "when": {
+        "textPresent": [
+          "Please correct the errors below."
+        ]
+      },
+      "role": "detector",
+      "class": "outcome",
+      "code": "VALIDATION_REJECTED",
+      "terminal": true
+    }
+  ],
+  "policy": {
+    "requiredScopes": [],
+    "riskySteps": []
+  }
+}

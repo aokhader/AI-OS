@@ -97,6 +97,9 @@ export function createPlannerFromEnv(input: PlannerFromEnvInput): PlannerFromEnv
     effort,
     baseURL: env.HANDSOFF_LLM_BASE_URL || undefined,
     images: onOff(env.HANDSOFF_LLM_IMAGES),
+    minIntervalMs: env.HANDSOFF_LLM_MIN_INTERVAL_MS
+      ? Number.parseInt(env.HANDSOFF_LLM_MIN_INTERVAL_MS, 10)
+      : undefined,
   });
   if (!resolved.ok) return { ok: false, error: resolved.error };
   for (const warning of resolved.warnings) log(warning);

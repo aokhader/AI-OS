@@ -24,6 +24,60 @@ function param(req: Request, name: string): string {
   return Array.isArray(v) ? (v[0] ?? '') : (v ?? '');
 }
 
+// ---- chaos injection (D-024) --------------------------------------------------------------------
+
+export const CHAOS_MODES = [
+  'not-found',
+  'validation',
+  'session-expiry',
+  'interstitial',
+  'slow',
+  'error',
+] as const;
+export type ChaosMode = (typeof CHAOS_MODES)[number];
+const CHAOS_COOKIE = 'coreteller_chaos';
+
+function cookieValue(req: Request, name: string): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(';')) {
+    const [key, ...rest] = part.trim().split('=');
+    if (key === name) return decodeURIComponent(rest.join('='));
+  }
+  return undefined;
+}
+
+interface Chaos {
+  /** True once per browser for an armed mode; false afterwards or when the mode is not armed. */
+  fire(mode: ChaosMode): boolean;
+}
+
+/**
+ * `x-handsoff-chaos: mode[,mode]` arms runtime conditions for the browser that sends it. Each mode
+ * fires once, on the request it targets, and is then remembered in a cookie of its own so that it
+ * stays fired even when the session cookie is cleared; that is what lets a recovery be observed
+ * succeeding. Ignored unless the server is configured to honour the header.
+ */
+function chaosFor(req: Request, res: Response, allow: boolean): Chaos {
+  const raw = req.headers['x-handsoff-chaos'];
+  const header = allow ? (Array.isArray(raw) ? raw.join(',') : (raw ?? '')) : '';
+  const armed = new Set(
+    header
+      .split(',')
+      .map((m) => m.trim())
+      .filter((m): m is ChaosMode => (CHAOS_MODES as readonly string[]).includes(m)),
+  );
+  const fired = new Set((cookieValue(req, CHAOS_COOKIE) ?? '').split(',').filter(Boolean));
+  return {
+    fire(mode) {
+      if (!armed.has(mode) || fired.has(mode)) return false;
+      fired.add(mode);
+      res.cookie(CHAOS_COOKIE, [...fired].join(','), { httpOnly: true, sameSite: 'lax' });
+      return true;
+    },
+  };
+}
+
 export function createApp(config: AppConfig, bank: Bank = createBank()): express.Express {
   const app = express();
   const { variant } = config;
@@ -57,6 +111,21 @@ export function createApp(config: AppConfig, bank: Bank = createBank()): express
   });
 
   const auth = requireAuth(config.sessionTtlMs);
+  const chaos = (req: Request, res: Response) => chaosFor(req, res, config.allowChaosHeader);
+
+  function renderError(res: Response): void {
+    const reference = `E${Date.now().toString(36).toUpperCase()}`;
+    res.status(500).render('error', { pageTitle: 'Application error', reference });
+  }
+
+  function renderResults(
+    res: Response,
+    mno: string,
+    member: ReturnType<Bank['findMember']>,
+    interstitial: boolean,
+  ): void {
+    res.render('search-results', { pageTitle: labels.searchResults, mno, member, interstitial });
+  }
 
   // ---- sign-in -------------------------------------------------------------------------------
 
@@ -106,10 +175,34 @@ export function createApp(config: AppConfig, bank: Bank = createBank()): express
     res.render('member-lookup', { pageTitle: labels.memberLookup, mno: '' });
   });
 
+  // The search is where most injected conditions land: it is the first request of every flow.
   app.post('/members/search', auth, (req, res) => {
     const mno = field(req.body, 'mno').trim();
-    const member = mno ? bank.findMember(mno) : undefined;
-    res.render('search-results', { pageTitle: labels.searchResults, mno, member });
+    const c = chaos(req, res);
+    if (c.fire('error')) {
+      renderError(res);
+      return;
+    }
+    if (c.fire('session-expiry')) {
+      req.session = null;
+      res.redirect('/login?expired=1');
+      return;
+    }
+    if (c.fire('slow')) {
+      res.render('busy', {
+        pageTitle: 'Please Wait',
+        refreshUrl: `/members/search?mno=${encodeURIComponent(mno)}`,
+      });
+      return;
+    }
+    const member = c.fire('not-found') || mno === '' ? undefined : bank.findMember(mno);
+    renderResults(res, mno, member, c.fire('interstitial'));
+  });
+
+  // Where the busy page lands after its refresh. Declared before /members/:id on purpose.
+  app.get('/members/search', auth, (req, res) => {
+    const mno = String(req.query.mno ?? '').trim();
+    renderResults(res, mno, mno === '' ? undefined : bank.findMember(mno), false);
   });
 
   app.get('/members/:id', auth, (req, res) => {
@@ -162,6 +255,10 @@ export function createApp(config: AppConfig, bank: Bank = createBank()): express
     if (!Number.isFinite(deposit) || deposit < 0) {
       errors.deposit = `${labels.initialDeposit} must be a number of 0 or more.`;
     }
+    // Injected validation: a legacy edit rule that rejects an otherwise valid submit once.
+    if (Object.keys(errors).length === 0 && chaos(req, res).fire('validation')) {
+      errors.deposit = `${labels.initialDeposit} must be entered with two decimal places, for example 25.00.`;
+    }
     if (Object.keys(errors).length > 0) {
       res.status(200).render('open-account', {
         pageTitle: labels.openSubAccount,
@@ -204,9 +301,8 @@ export function createApp(config: AppConfig, bank: Bank = createBank()): express
   });
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const reference = `E${Date.now().toString(36).toUpperCase()}`;
-    console.error(`[legacy-bank] ${reference}`, err);
-    res.status(500).render('error', { pageTitle: 'Application error', reference });
+    console.error('[legacy-bank]', err);
+    renderError(res);
   });
 
   return app;

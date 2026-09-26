@@ -116,6 +116,8 @@ export async function createPlaywrightSurface(
 export class PlaywrightSurface implements Surface {
   private readonly refFrames = new Map<string, Frame>();
   private pendingDialog: Dialog | undefined;
+  /** Observations in flight when a dialog opens; see raceDialog(). */
+  private readonly dialogWaiters = new Set<() => void>();
   private lastNodes: A11yNode[] = [];
   private lastFrames: FrameInfo[] = [];
   private lastTitle = '';
@@ -130,7 +132,29 @@ export class PlaywrightSurface implements Surface {
     this.actionTimeout = options.actionTimeoutMs ?? 10_000;
     page.on('dialog', (dialog) => {
       this.pendingDialog = dialog;
+      for (const wake of this.dialogWaiters) wake();
+      this.dialogWaiters.clear();
     });
+  }
+
+  /**
+   * Script evaluation blocks for as long as a native dialog is open, so any snapshot that is
+   * running when one appears would never return. Race it against the dialog event instead.
+   */
+  private async raceDialog<T>(work: () => Promise<T>): Promise<T | 'dialog'> {
+    if (this.pendingDialog) return 'dialog';
+    let wake: () => void = () => undefined;
+    const opened = new Promise<'dialog'>((resolve) => {
+      wake = () => resolve('dialog');
+    });
+    this.dialogWaiters.add(wake);
+    try {
+      const pending = work();
+      pending.catch(() => undefined); // if the dialog wins, the evaluation settles later; never unhandled
+      return await Promise.race([pending, opened]);
+    } finally {
+      this.dialogWaiters.delete(wake);
+    }
   }
 
   info(): SurfaceInfo {
@@ -140,19 +164,43 @@ export class PlaywrightSurface implements Surface {
   async observe(options: ObserveOptions = {}): Promise<SurfaceObservation> {
     const at = new Date().toISOString();
 
-    // Script execution is blocked while a native dialog is open; report it on top of the last snapshot.
+    // Script execution is blocked while a native dialog is open; report it on top of the last
+    // snapshot. The same applies when the dialog opens while the snapshot is being taken.
+    const snapshot = await this.raceDialog(() => this.snapshotAll());
     const dialog = this.pendingDialog;
-    if (dialog) {
+    if (snapshot === 'dialog' || dialog) {
+      const d = dialog as Dialog;
       return {
         at,
         url: this.page.url(),
         title: this.lastTitle,
         frames: this.lastFrames,
-        nodes: [...this.lastNodes, ...this.dialogNodes(dialog)],
-        dialogs: [{ kind: dialogKind(dialog.type()), text: dialog.message() }],
+        nodes: [...this.lastNodes, ...this.dialogNodes(d)],
+        dialogs: [{ kind: dialogKind(d.type()), text: d.message() }],
       };
     }
 
+    const { nodes, frames, title } = snapshot;
+    this.lastNodes = nodes;
+    this.lastFrames = frames;
+    this.lastTitle = title;
+
+    const obs: SurfaceObservation = {
+      at,
+      url: this.page.url(),
+      title,
+      frames,
+      nodes,
+      dialogs: [],
+    };
+    if (options.screenshot ?? true) {
+      obs.screenshotPng = await this.page.screenshot({ type: 'png' });
+    }
+    return obs;
+  }
+
+  /** Walks every frame with the in-page script and re-registers the refs it handed out. */
+  private async snapshotAll(): Promise<{ nodes: A11yNode[]; frames: FrameInfo[]; title: string }> {
     await this.settle();
     const nodes: A11yNode[] = [];
     const frames: FrameInfo[] = [];
@@ -181,22 +229,7 @@ export class PlaywrightSurface implements Surface {
       frames.push({ framePath, url: raw.url, title: raw.title });
     }
     const title = await this.page.title().catch(() => '');
-    this.lastNodes = nodes;
-    this.lastFrames = frames;
-    this.lastTitle = title;
-
-    const obs: SurfaceObservation = {
-      at,
-      url: this.page.url(),
-      title,
-      frames,
-      nodes,
-      dialogs: [],
-    };
-    if (options.screenshot ?? true) {
-      obs.screenshotPng = await this.page.screenshot({ type: 'png' });
-    }
-    return obs;
+    return { nodes, frames, title };
   }
 
   async act(action: Action, context: ActContext): Promise<ActResult> {

@@ -29,6 +29,7 @@ import {
   type EngineDeps,
   type EngineTimeouts,
   Stop,
+  sleep,
 } from './base.js';
 import { resolveValue } from './values.js';
 
@@ -202,13 +203,12 @@ class DiscoveryEngine extends EngineBase {
     for (let turn = 1; turn <= maxSteps; turn++) {
       this.checkRunTimeout();
       this.currentStep = `t${turn}`;
-      const obs = await this.observe('turn', `t${turn}`);
+      const obs = await this.checkDetectors(await this.observe('turn', `t${turn}`), `t${turn}`);
       firstObservation ??= obs;
       if (pending) {
         this.commit(pending, obs);
         pending = undefined;
       }
-      this.checkDetectors(obs, `t${turn}`);
       this.checkStuck(obs);
 
       const redacted = redactObservation(obs, this.sensitive);
@@ -267,6 +267,20 @@ class DiscoveryEngine extends EngineBase {
       { kind: 'stopped', status: 'limit', reason: `step limit of ${maxSteps} reached` },
       this.currentStep,
     );
+  }
+
+  /**
+   * Gives the page a moment to react before the next observation: a click that navigates would
+   * otherwise be observed on the page it left. Bounded, since some actions change nothing visible.
+   */
+  private async settleAfter(before: SurfaceObservation): Promise<void> {
+    const digest = digestOf(before);
+    const deadline = Date.now() + 1_500;
+    while (Date.now() < deadline) {
+      const now = await this.deps.surface.observe({ screenshot: false });
+      if (digestOf(now) !== digest) return;
+      await sleep(100);
+    }
   }
 
   private async perform(
@@ -330,6 +344,7 @@ class DiscoveryEngine extends EngineBase {
       durationMs: Date.now() - started,
     });
     if (!r.ok) return { status: 'failed', detail: `${r.reason}: ${r.detail}` };
+    await this.settleAfter(obs);
 
     const signature = JSON.stringify({
       kind: action.kind,
@@ -407,18 +422,36 @@ class DiscoveryEngine extends EngineBase {
     return { outputs };
   }
 
-  private checkDetectors(obs: SurfaceObservation, stepId: string): void {
-    const c = classify(obs, { stepId, detectors: this.deps.profile.detectors });
-    if (c.kind === 'proceed') return;
-    const reason =
-      c.kind === 'outcome'
-        ? `${c.code}: ${c.message}`
-        : c.kind === 'fail'
-          ? `${c.failure}: ${c.observed}`
-          : c.kind === 'recover'
-            ? `condition ${c.condition.id} needs recovery "${c.routine.kind}" (P4)`
-            : `condition ${c.condition.id} requires an operator (P6)`;
-    throw new Stop({ kind: 'stopped', status: 'aborted', reason }, stepId);
+  /**
+   * Profile detectors apply during discovery too: interstitials and busy pages are recovered
+   * before the model sees the page; a lost session ends the run, since discovery cannot sign in
+   * again mid-flow without the model seeing credentials.
+   */
+  private async checkDetectors(
+    obs: SurfaceObservation,
+    stepId: string,
+  ): Promise<SurfaceObservation> {
+    let current = obs;
+    for (;;) {
+      const c = classify(current, { stepId, detectors: this.deps.profile.detectors });
+      if (c.kind === 'proceed') return current;
+      if (c.kind === 'recover' && c.routine.kind !== 'rebootstrap') {
+        if ((await this.recover(c, stepId, current)) !== 'recovered') {
+          throw this.exhausted(c, stepId);
+        }
+        current = await this.observe('turn', stepId);
+        continue;
+      }
+      const reason =
+        c.kind === 'outcome'
+          ? `${c.code}: ${c.message}`
+          : c.kind === 'fail'
+            ? `${c.failure}: ${c.observed}`
+            : c.kind === 'recover'
+              ? `session lost (${c.condition.id}); discovery cannot sign in again mid-flow`
+              : `condition ${c.condition.id} requires an operator (P6)`;
+      throw new Stop({ kind: 'stopped', status: 'aborted', reason }, stepId);
+    }
   }
 
   private checkStuck(obs: SurfaceObservation): void {

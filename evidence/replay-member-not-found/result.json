@@ -1,0 +1,27 @@
+{
+  "status": "outcome",
+  "code": "MEMBER_NOT_FOUND",
+  "message": "condition member-not-found matched",
+  "capability": {
+    "id": "get-member-savings-balance",
+    "version": 3
+  },
+  "atStep": "s2",
+  "stepsRun": [
+    {
+      "stepId": "s1",
+      "attempts": 1,
+      "durationMs": 113,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    }
+  ],
+  "recoveries": [],
+  "sideEffects": "none",
+  "evidence": {
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_030410_0c9a",
+    "failingScreenshot": "steps/010-s2-after.png",
+    "lastObservation": "snapshots/s2.json"
+  }
+}

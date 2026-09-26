@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createFsStore, ReplayArgumentError, type ReplayResult, replay } from '@handsoff/core';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
+import { loadPolicy } from './policy.js';
 
 export interface ReplayCommandOptions {
   capability: string;
@@ -117,6 +118,7 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
         baseUrl,
         stepTimeoutMs: intEnv('HANDSOFF_STEP_TIMEOUT_MS'),
         runTimeoutMs: intEnv('HANDSOFF_RUN_TIMEOUT_MS'),
+        budgets: loadPolicy(env)?.budgets,
       },
       { surface, store, profile, env, log: (line) => console.error(`  ${line}`) },
     );

@@ -1,0 +1,356 @@
+{
+  "at": "2026-09-25T10:04:20.216Z",
+  "url": "http://localhost:4102/",
+  "title": "First Example Credit Union - ACME CoreTeller",
+  "frames": [
+    {
+      "framePath": [],
+      "url": "http://localhost:4102/",
+      "title": "First Example Credit Union - ACME CoreTeller"
+    },
+    {
+      "framePath": [
+        "nav"
+      ],
+      "url": "http://localhost:4102/nav",
+      "title": "First Example Credit Union - ACME CoreTeller - Navigation"
+    },
+    {
+      "framePath": [
+        "main"
+      ],
+      "url": "http://localhost:4102/login?expired=1",
+      "title": "First Example Credit Union - ACME CoreTeller - Sign In"
+    }
+  ],
+  "nodes": [
+    {
+      "ref": "e1",
+      "role": "cell",
+      "name": "First Example Credit Union | ACME CoreTeller 7.4.2",
+      "states": [],
+      "bbox": {
+        "x": 8,
+        "y": 8,
+        "w": 154,
+        "h": 72
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[1]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e2",
+      "role": "cell",
+      "name": "Menu",
+      "states": [],
+      "bbox": {
+        "x": 9,
+        "y": 96,
+        "w": 152,
+        "h": 23
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e3",
+      "role": "cell",
+      "name": "Member Lookup",
+      "states": [],
+      "bbox": {
+        "x": 9,
+        "y": 119,
+        "w": 152,
+        "h": 23
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[2]/td[1]"
+    },
+    {
+      "ref": "e4",
+      "role": "link",
+      "name": "Member Lookup",
+      "states": [],
+      "bbox": {
+        "x": 13,
+        "y": 123,
+        "w": 96.328125,
+        "h": 15
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[2]/td[1]/a[1]",
+      "parentRef": "e3"
+    },
+    {
+      "ref": "e5",
+      "role": "cell",
+      "name": "Sign out",
+      "states": [],
+      "bbox": {
+        "x": 9,
+        "y": 142,
+        "w": 152,
+        "h": 23
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[3]/td[1]"
+    },
+    {
+      "ref": "e6",
+      "role": "link",
+      "name": "Sign out",
+      "states": [],
+      "bbox": {
+        "x": 13,
+        "y": 146,
+        "w": 50.390625,
+        "h": 15
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[3]/td[1]/a[1]",
+      "parentRef": "e5"
+    },
+    {
+      "ref": "e7",
+      "role": "cell",
+      "name": "Teller: teller",
+      "states": [],
+      "bbox": {
+        "x": 8,
+        "y": 181,
+        "w": 154,
+        "h": 20
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[3]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e8",
+      "role": "cell",
+      "name": "First Example Credit Union | ACME CoreTeller 7.4.2",
+      "states": [],
+      "bbox": {
+        "x": 181,
+        "y": 8,
+        "w": 1091,
+        "h": 27
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "table[1]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e9",
+      "role": "text",
+      "name": "Sign In",
+      "states": [],
+      "bbox": {
+        "x": 181,
+        "y": 58,
+        "w": 1091,
+        "h": 17
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "div[1]"
+    },
+    {
+      "ref": "e10",
+      "role": "text",
+      "name": "Your session has expired. Please sign in again.",
+      "states": [],
+      "bbox": {
+        "x": 181,
+        "y": 87,
+        "w": 1091,
+        "h": 15
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "p[1]"
+    },
+    {
+      "ref": "e11",
+      "role": "cell",
+      "name": "User ID",
+      "states": [],
+      "bbox": {
+        "x": 182,
+        "y": 115,
+        "w": 73.40625,
+        "h": 29
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e12",
+      "role": "cell",
+      "name": "",
+      "states": [],
+      "bbox": {
+        "x": 255.40625,
+        "y": 115,
+        "w": 185,
+        "h": 29
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[1]/td[2]"
+    },
+    {
+      "ref": "e13",
+      "role": "textbox",
+      "name": "",
+      "value": "",
+      "states": [],
+      "bbox": {
+        "x": 259.40625,
+        "y": 119,
+        "w": 177,
+        "h": 21
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[1]/td[2]/input[1]",
+      "parentRef": "e12"
+    },
+    {
+      "ref": "e14",
+      "role": "cell",
+      "name": "Password",
+      "states": [],
+      "bbox": {
+        "x": 182,
+        "y": 144,
+        "w": 73.40625,
+        "h": 29
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[2]/td[1]"
+    },
+    {
+      "ref": "e15",
+      "role": "cell",
+      "name": "",
+      "states": [],
+      "bbox": {
+        "x": 255.40625,
+        "y": 144,
+        "w": 185,
+        "h": 29
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[2]/td[2]"
+    },
+    {
+      "ref": "e16",
+      "role": "textbox",
+      "name": "",
+      "states": [],
+      "bbox": {
+        "x": 259.40625,
+        "y": 148,
+        "w": 177,
+        "h": 21
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[2]/td[2]/input[1]",
+      "parentRef": "e15"
+    },
+    {
+      "ref": "e17",
+      "role": "cell",
+      "name": "",
+      "states": [],
+      "bbox": {
+        "x": 182,
+        "y": 173,
+        "w": 73.40625,
+        "h": 29
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[3]/td[1]"
+    },
+    {
+      "ref": "e18",
+      "role": "cell",
+      "name": "",
+      "states": [],
+      "bbox": {
+        "x": 255.40625,
+        "y": 173,
+        "w": 185,
+        "h": 29
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[3]/td[2]"
+    },
+    {
+      "ref": "e19",
+      "role": "button",
+      "name": "Sign In",
+      "states": [],
+      "bbox": {
+        "x": 259.40625,
+        "y": 177,
+        "w": 57.5,
+        "h": 21
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "form[1]/table[1]/tr[3]/td[2]/input[1]",
+      "parentRef": "e18"
+    },
+    {
+      "ref": "e20",
+      "role": "cell",
+      "name": "© ACME CoreTeller. For authorized personnel of First Example Credit Union only. Synthetic data.",
+      "states": [],
+      "bbox": {
+        "x": 181,
+        "y": 218,
+        "w": 1091,
+        "h": 16
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "table[2]/tr[1]/td[1]"
+    }
+  ],
+  "dialogs": [],
+  "digest": "a70471cec1653d10007f5f43"
+}

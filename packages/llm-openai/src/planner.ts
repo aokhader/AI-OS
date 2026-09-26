@@ -33,6 +33,8 @@ const REASONING_EFFORTS: ReadonlySet<string> = new Set([
   'max',
 ]);
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 export interface OpenAiPlannerOptions {
   /** Model id as the endpoint names it. No default: it depends on the endpoint. */
   model: string;
@@ -51,8 +53,15 @@ export interface OpenAiPlannerOptions {
   maxNodes?: number | undefined;
   /** Sent as `max_completion_tokens` when set. A decision is one small tool call, so unset by default. */
   maxTokens?: number | undefined;
-  /** SDK retries with backoff on 429 and 5xx; free tiers rate-limit hard, so the default is 5. */
+  /** SDK retries with backoff on 5xx and 429 before the planner's own rate-limit handling. Default 2. */
   maxRetries?: number | undefined;
+  /**
+   * Minimum time between two requests. Free tiers meter requests per minute (Google AI Studio:
+   * five), and a discovery turn is quicker than that, so the planner paces itself.
+   */
+  minIntervalMs?: number | undefined;
+  /** How many times a 429 is waited out (for the delay the error names) before giving up. Default 4. */
+  rateLimitRetries?: number | undefined;
   timeoutMs?: number | undefined;
   log?: ((line: string) => void) | undefined;
   client?: OpenAI | undefined;
@@ -64,6 +73,14 @@ export function toolDefinitions(): OpenAI.Chat.Completions.ChatCompletionFunctio
     type: 'function',
     function: { name: spec.name, description: spec.description, parameters: spec.parameters },
   }));
+}
+
+/** Seconds a 429 asks us to wait, if it says ("Please retry in 11.8s", `retryDelay: "11s"`). */
+export function retryDelaySeconds(message: string): number | undefined {
+  const m = /retry in ([\d.]+)\s*s/i.exec(message) ?? /retryDelay"?:\s*"?([\d.]+)s/i.exec(message);
+  if (!m?.[1]) return undefined;
+  const n = Number.parseFloat(m[1]);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /**
@@ -88,6 +105,8 @@ class OpenAiPlanner implements Planner {
   private readonly imagesInLastTurns: number;
   private readonly maxNodes: number;
   private readonly maxTokens: number | undefined;
+  private readonly minIntervalMs: number;
+  private readonly rateLimitRetries: number;
   private readonly log: (line: string) => void;
   private readonly tools = toolDefinitions();
   private readonly messages: Message[] = [];
@@ -100,6 +119,7 @@ class OpenAiPlanner implements Planner {
     text: '',
     image: false,
   };
+  private lastCallAt = 0;
   private servedBy: string | undefined;
 
   constructor(options: OpenAiPlannerOptions) {
@@ -108,7 +128,7 @@ class OpenAiPlanner implements Planner {
       new OpenAI({
         ...(options.baseURL ? { baseURL: options.baseURL } : {}),
         ...(options.apiKey ? { apiKey: options.apiKey } : {}),
-        maxRetries: options.maxRetries ?? 5,
+        maxRetries: options.maxRetries ?? 2,
         ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
       });
     this.provider = options.provider ?? 'openai-compatible';
@@ -121,6 +141,8 @@ class OpenAiPlanner implements Planner {
     this.imagesInLastTurns = options.imagesInLastTurns ?? 2;
     this.maxNodes = options.maxNodes ?? 300;
     this.maxTokens = options.maxTokens;
+    this.minIntervalMs = options.minIntervalMs ?? 0;
+    this.rateLimitRetries = options.rateLimitRetries ?? 4;
     this.log = options.log ?? (() => undefined);
   }
 
@@ -178,8 +200,9 @@ class OpenAiPlanner implements Planner {
       });
       this.pendingToolCallId = first.id;
       this.ignoredCalls = calls.length - 1;
-      if (this.ignoredCalls > 0)
+      if (this.ignoredCalls > 0) {
         this.log(`model returned ${calls.length} tool calls; using the first`);
+      }
 
       const parsed = parseCall(first);
       if (!parsed.ok) {
@@ -265,34 +288,64 @@ class OpenAiPlanner implements Planner {
     });
   }
 
+  private async pace(): Promise<void> {
+    if (this.minIntervalMs <= 0) return;
+    const wait = this.lastCallAt + this.minIntervalMs - Date.now();
+    if (wait > 0) {
+      this.log(`pacing: waiting ${(wait / 1000).toFixed(1)} s for the request-rate limit`);
+      await sleep(wait);
+    }
+  }
+
   private async call(): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-      model: this.model,
-      messages: this.requestMessages(),
-      tools: this.tools,
-      tool_choice: 'auto',
-      ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
-      ...(this.maxTokens ? { max_completion_tokens: this.maxTokens } : {}),
-    };
-    try {
-      const response = await this.client.chat.completions.create(params);
-      if (response.model && response.model !== this.model) this.servedBy = response.model;
-      return response;
-    } catch (err) {
-      if (err instanceof OpenAI.BadRequestError) {
-        if (this.reasoningEffort && /reasoning/i.test(err.message)) {
-          this.log('reasoning_effort not accepted by the endpoint; continuing without it');
-          this.reasoningEffort = undefined;
-          return this.call();
+    let rateLimited = 0;
+    for (;;) {
+      // Rebuilt per attempt: a retry after a rejected parameter sends a fresh request object.
+      const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+        model: this.model,
+        messages: this.requestMessages(),
+        tools: this.tools,
+        tool_choice: 'auto',
+        ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
+        ...(this.maxTokens ? { max_completion_tokens: this.maxTokens } : {}),
+      };
+      await this.pace();
+      this.lastCallAt = Date.now();
+      try {
+        const response = await this.client.chat.completions.create(params);
+        if (response.model && response.model !== this.model) this.servedBy = response.model;
+        return response;
+      } catch (err) {
+        if (err instanceof OpenAI.RateLimitError && /per ?day/i.test(err.message)) {
+          this.log(
+            `daily request quota exhausted for ${this.model}; set HANDSOFF_MODEL to another model or retry tomorrow`,
+          );
+          throw err;
         }
-        if (this.images && /image|vision|multimodal/i.test(err.message)) {
-          this.log('images not accepted by the endpoint; continuing with text only');
-          this.images = false;
-          this.dropAllImages();
-          return this.call();
+        if (err instanceof OpenAI.RateLimitError && rateLimited < this.rateLimitRetries) {
+          rateLimited += 1;
+          const seconds = Math.max(retryDelaySeconds(err.message) ?? 20, 5) + 1;
+          this.log(
+            `rate limited by the endpoint; waiting ${seconds.toFixed(0)} s (${rateLimited}/${this.rateLimitRetries})`,
+          );
+          await sleep(seconds * 1000);
+          continue;
         }
+        if (err instanceof OpenAI.BadRequestError) {
+          if (this.reasoningEffort && /reasoning/i.test(err.message)) {
+            this.log('reasoning_effort not accepted by the endpoint; continuing without it');
+            this.reasoningEffort = undefined;
+            continue;
+          }
+          if (this.images && /image|vision|multimodal/i.test(err.message)) {
+            this.log('images not accepted by the endpoint; continuing with text only');
+            this.images = false;
+            this.dropAllImages();
+            continue;
+          }
+        }
+        throw err;
       }
-      throw err;
     }
   }
 

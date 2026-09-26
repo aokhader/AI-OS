@@ -1,6 +1,6 @@
 # 02 · Tech Stack and Data Model
 
-Status: stable · Last updated: 2026-09-22
+Status: stable · Last updated: 2026-09-25
 
 The concrete choices behind [01-architecture.md](01-architecture.md). Every type here has a zod schema of the same name in `@handsoff/core` (`CapabilitySchema`, `ConditionSchema`, …) and the TypeScript type is inferred from it. The JSON Schema for `Capability` is exported so a reviewer can validate an artifact without running the code.
 
@@ -45,7 +45,7 @@ The engine talks to a `Planner`; the planner talks to a model. What every planne
 | Provider id | Package | Endpoint | Key | Default model |
 |---|---|---|---|---|
 | `anthropic` | `@handsoff/llm-anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` | `claude-opus-5` |
-| `google` | `@handsoff/llm-openai` | Google AI Studio, OpenAI-compatible endpoint (free tier) | `GEMINI_API_KEY` | `gemini-3.8-flash` |
+| `google` | `@handsoff/llm-openai` | Google AI Studio, OpenAI-compatible endpoint (free tier) | `GEMINI_API_KEY` | `gemini-3.8-flash` (free tier: about 20 requests a day, five a minute) |
 | `openai` | `@handsoff/llm-openai` | OpenAI | `OPENAI_API_KEY` | none; set `HANDSOFF_MODEL` |
 | `groq` | `@handsoff/llm-openai` | Groq (free tier) | `GROQ_API_KEY` | none |
 | `openrouter` | `@handsoff/llm-openai` | OpenRouter | `OPENROUTER_API_KEY` | none |
@@ -608,6 +608,7 @@ Points a reviewer should be able to check from this file alone: what the capabil
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | none | discovery only; replay never reads them |
 | `HANDSOFF_LLM_BASE_URL`, `HANDSOFF_LLM_API_KEY` | none | provider `openai-compatible` |
 | `HANDSOFF_MODEL` | provider default: `claude-opus-5`, `gemini-3.8-flash`; required elsewhere | planner |
+| `HANDSOFF_LLM_MIN_INTERVAL_MS` | preset: 12500 for google (five requests a minute), 0 elsewhere | planner pacing |
 | `HANDSOFF_EFFORT` | `high` for anthropic; forwarded to google and openai only | planner |
 | `HANDSOFF_LLM_IMAGES` | preset: on for anthropic, google, openai | planner |
 | `HANDSOFF_FALLBACKS` | `on` | anthropic planner |
@@ -623,6 +624,6 @@ Points a reviewer should be able to check from this file alone: what the capabil
 | `LEGACY_BANK_SESSION_TTL_MS` | `1800000` | mock app; chaos sets it low |
 | `LEGACY_BANK_ALLOW_CHAOS_HEADER` | `true` in dev | mock app honours `x-handsoff-chaos` |
 
-Chaos injection: `handsoff replay --chaos <mode>[,<mode>]` sets an `x-handsoff-chaos` header on the browser context. The mock app honours it only when `LEGACY_BANK_ALLOW_CHAOS_HEADER` is true. Modes: `not-found` (any member id is unknown), `validation` (the sub-account form rejects the first submit), `session-expiry` (the session cookie expires after the next request), `interstitial` (a "System notice" modal is injected on the next page load), `slow` (2 s delay on the next response), `error` (the next response is a 500 page). Modes fire once, then clear, so a recovery can be observed succeeding.
+Chaos injection ([D-024](08-decision-log.md#d-024--chaos-modes-four-required-two-optional)): `handsoff replay --chaos <mode>[,<mode>]` sets an `x-handsoff-chaos` header on the browser context. The mock app honours it only when `LEGACY_BANK_ALLOW_CHAOS_HEADER` is true. Each mode fires once per browser, on the request it targets, and is then remembered in a cookie of its own (so it stays fired after the session cookie is cleared), which is what lets a recovery be observed succeeding. The member search is the target of most modes because it is the first request of every flow: `not-found` (the next search finds nobody), `session-expiry` (the next search clears the session and bounces to sign-in with the notice), `interstitial` (the next results page opens a native "System notice" `alert()`), `slow` (the next search shows a "system is busy" page that refreshes to the results after 2 s), `error` (the next search is a 500 application-error page). `validation` targets the sub-account form: the next otherwise valid submit is rejected with a legacy edit rule. Several modes can be armed at once; one fires per request.
 
 Running without live services: replay needs no API key and no network. Discovery tests use `ScriptedPlanner`, which replays a saved decision list from `packages/core/test/fixtures/` against the mock app.

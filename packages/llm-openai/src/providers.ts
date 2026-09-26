@@ -26,6 +26,8 @@ export interface ProviderPreset {
   images: boolean;
   /** Forward `HANDSOFF_EFFORT` as `reasoning_effort`. */
   reasoningEffort: boolean;
+  /** Pace requests for a metered free tier. `HANDSOFF_LLM_MIN_INTERVAL_MS` overrides. */
+  minIntervalMs?: number;
   /** Where to get a key. */
   keysUrl?: string;
 }
@@ -36,9 +38,14 @@ export const PROVIDERS: Record<ProviderId, ProviderPreset> = {
     label: 'Google AI Studio (Gemini, OpenAI-compatible endpoint)',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     apiKeyEnv: 'GEMINI_API_KEY',
+    // Google recommends this model and retires older ones for new users; on the free tier it
+    // allows about 20 requests a day (verified 2026-09-25), roughly two discovery runs. Set
+    // HANDSOFF_MODEL to pick another model.
     defaultModel: 'gemini-3.8-flash',
     images: true,
     reasoningEffort: true,
+    // The free tier allows five requests per minute per model.
+    minIntervalMs: 12_500,
     keysUrl: 'https://aistudio.google.com/apikey',
   },
   openai: {
@@ -100,6 +107,8 @@ export interface ResolveProviderInput {
   baseURL?: string | undefined;
   /** `HANDSOFF_LLM_IMAGES`; overrides the preset. */
   images?: boolean | undefined;
+  /** `HANDSOFF_LLM_MIN_INTERVAL_MS`; overrides the preset. */
+  minIntervalMs?: number | undefined;
 }
 
 export type ResolvedProvider =
@@ -180,6 +189,7 @@ export function resolveProvider(input: ResolveProviderInput): ResolvedProvider {
       apiKey,
       reasoningEffort,
       images: input.images ?? preset.images,
+      minIntervalMs: input.minIntervalMs ?? preset.minIntervalMs,
     },
   };
 }

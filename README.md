@@ -4,7 +4,7 @@ Computer-use automation for legacy banking software. An LLM figures out how to c
 
 Take-home assessment for interface.ai. The brief is at [docs/description.md](docs/description.md). The project's working knowledge base, read at the start of every session, is [docs/context/](docs/context/README.md).
 
-> Status: P0–P3 complete. Deterministic replay works end to end against the mock app; a real model-driven discovery (Gemini via Google AI Studio) compiled `get-member-savings-balance` v3, which replays to the balance and to the not-found outcome; that run is in [evidence/discovery-run](evidence/discovery-run). The console lists runs and capabilities. Next: P4 chaos modes and the full condition classifier. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
+> Status: P0–P4 complete. Deterministic replay works end to end against the mock app; a real model-driven discovery (Gemini via Google AI Studio) compiled `get-member-savings-balance` v3, which replays to the balance and to the not-found outcome; that run is in [evidence/discovery-run](evidence/discovery-run). Every runtime condition in the brief is injectable in the mock app and answered by the classifier: business outcomes stop with a code, interstitials, busy pages and session expiry are recovered and reported, error pages fail with evidence. The console lists runs and capabilities. Next: P5 policy gate, redaction and screenshot masking. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
 
 ## Layout
 
@@ -43,6 +43,28 @@ Exit code 0 and `{"savingsBalance": 1250.75}` on stdout; the run folder with scr
 pnpm handsoff replay --capability get-member-savings-balance --param memberId=99999   # outcome MEMBER_NOT_FOUND, exit 3
 ```
 
+Inject a runtime condition into the mock app and watch the classifier answer it (each mode fires once per browser; see [docs/context/02](docs/context/02-tech-stack-and-data-model.md#configuration-and-environment)):
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --chaos session-expiry   # success, one rebootstrap recovery, s1 and s2 at two attempts
+```
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --chaos interstitial     # success, one dismissed System notice
+```
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --chaos error            # failure APP_ERROR at s2 with screenshot and snapshot
+```
+
+Other modes: `not-found` and `slow` (busy page waited out with wait-retry). The second capability, `open-sub-account`, was discovered by a model too and exercises the write path; `validation` rejects its submit once:
+
+```bash
+pnpm handsoff replay --capability open-sub-account --param memberId=10001 --param "accountType=Checking" --param deposit=40.00 --chaos validation   # outcome VALIDATION_REJECTED at s7, exit 3
+```
+
+Recoveries never change the result status; they are listed in `recoveries` and in the run's event log.
+
 Discover a capability with a model. Put a key for any supported provider in `.env`; the free Google AI Studio tier is enough:
 
 ```bash
@@ -51,7 +73,7 @@ HANDSOFF_LLM_PROVIDER=google
 GEMINI_API_KEY=...            # https://aistudio.google.com/apikey
 ```
 
-Other providers: `anthropic` (`ANTHROPIC_API_KEY`), `openai` (`OPENAI_API_KEY`), `groq` (`GROQ_API_KEY`), `openrouter` (`OPENROUTER_API_KEY`), `ollama` (local, no key), or `openai-compatible` with `HANDSOFF_LLM_BASE_URL`. With `HANDSOFF_LLM_PROVIDER` empty the CLI uses whichever key it finds, and `--provider` overrides both. `HANDSOFF_MODEL` overrides the provider's default model (`claude-opus-5`, `gemini-3.8-flash`; the others need it set). The browser is headed so you can watch:
+Other providers: `anthropic` (`ANTHROPIC_API_KEY`), `openai` (`OPENAI_API_KEY`), `groq` (`GROQ_API_KEY`), `openrouter` (`OPENROUTER_API_KEY`), `ollama` (local, no key), or `openai-compatible` with `HANDSOFF_LLM_BASE_URL`. With `HANDSOFF_LLM_PROVIDER` empty the CLI uses whichever key it finds, and `--provider` overrides both. `HANDSOFF_MODEL` overrides the provider's default model (`claude-opus-5`, `gemini-3.8-flash`; the others need it set). The Google preset paces requests to the free tier's five per minute; the newest Flash models also cap the free tier at about 20 requests a day, which one discovery run can exhaust. The browser is headed so you can watch:
 
 ```bash
 pnpm handsoff discover --goal "Look up member {memberId} and return the current balance of the Savings account" --param memberId=10001 --sensitive memberId --describe "memberId=Member number as printed on the member card" --id get-member-savings-balance --outcome "MEMBER_NOT_FOUND=No matching member"
@@ -85,7 +107,7 @@ Checks:
 
 ```bash
 pnpm test               # schema, resolver, classifier, compiler, planner, API and mock-app tests; no browser, no API key
-pnpm test:integration   # real headless Chromium against the in-process mock app: replay, and discover → compile → replay; no API key
+pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, and every chaos mode; no API key
 pnpm typecheck
 pnpm lint
 ```

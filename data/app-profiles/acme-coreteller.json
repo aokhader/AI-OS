@@ -153,6 +153,15 @@
       }
     },
     {
+      "id": "system-busy",
+      "role": "detector",
+      "class": "recover",
+      "code": "SYSTEM_BUSY",
+      "message": "The application asked to wait and will refresh on its own",
+      "when": { "textPresent": ["system is busy"] },
+      "recovery": { "kind": "wait-retry", "ms": 1500, "maxAttempts": 3 }
+    },
+    {
       "id": "app-error",
       "role": "detector",
       "class": "fail",

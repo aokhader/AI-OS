@@ -11,6 +11,8 @@ import {
   type BootstrapStep,
   type Condition,
   type FailureKind,
+  type Recovery,
+  type RecoveryRoutine,
   type RunEvent,
   type SideEffects,
   type Step,
@@ -33,10 +35,27 @@ export interface EngineDeps {
   log?: ((line: string) => void) | undefined;
 }
 
+/** Recovery budgets (01 §9); the defaults match config/policy.json. */
+export interface EngineBudgets {
+  recoveriesPerStep?: number | undefined;
+  rebootstrapsPerRun?: number | undefined;
+}
+
 export interface EngineTimeouts {
   stepTimeoutMs?: number | undefined;
   runTimeoutMs?: number | undefined;
+  budgets?: EngineBudgets | undefined;
 }
+
+export interface ResolvedBudgets {
+  recoveriesPerStep: number;
+  rebootstrapsPerRun: number;
+}
+
+export const DEFAULT_BUDGETS: ResolvedBudgets = {
+  recoveriesPerStep: 2,
+  rebootstrapsPerRun: 1,
+};
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type EventInput = DistributiveOmit<RunEvent, 'at' | 'runId'>;
@@ -62,6 +81,30 @@ export class Stop extends Error {
   }
 }
 
+/**
+ * A session-level condition (the sign-in page is back) needs the bootstrap routine to run again.
+ * Raised from wherever the condition is seen and handled by the engine's outer loop (D-033).
+ */
+export class RebootstrapSignal extends Error {
+  override readonly name = 'RebootstrapSignal';
+  constructor(
+    readonly condition: Condition,
+    readonly stepId: string,
+  ) {
+    super(`rebootstrap: ${condition.id} at ${stepId}`);
+  }
+}
+
+export interface WaitResult {
+  matched: boolean;
+  obs: SurfaceObservation;
+  detail: string;
+  /** A terminal classification met while waiting (outcome, fail or escalate); the caller raises it. */
+  verdict?: Classification | undefined;
+}
+
+type RecoverClassification = Extract<Classification, { kind: 'recover' }>;
+
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export function credentialsFromEnv(
@@ -83,13 +126,15 @@ export function credentialsFromEnv(
 
 /**
  * What discovery and replay share: the run folder, evidence recording, observation and waiting,
- * bootstrap, and the execution of one compiled step. Subclasses own their loop and their result.
+ * bootstrap, recovery routines with their budgets, and the execution of one compiled step.
+ * Subclasses own their loop and their result.
  */
 export abstract class EngineBase {
   protected run!: RunHandle;
   protected readonly now: () => Date;
   protected readonly stepTimeoutMs: number;
   protected readonly runTimeoutMs: number;
+  protected readonly budgets: ResolvedBudgets;
   protected readonly deadline: number;
   protected shots = 0;
   protected currentStep: string | undefined;
@@ -99,9 +144,13 @@ export abstract class EngineBase {
   protected riskyExecuted = false;
   protected riskyConfirmed = false;
   protected readonly stepsRun: StepReport[] = [];
+  protected readonly recoveries: Recovery[] = [];
   protected readonly rawOutputs = new Map<string, string>();
   /** Values that must never be persisted in clear text. */
   protected sensitive: SensitiveValue[] = [];
+  private readonly recoveryCounts = new Map<string, number>();
+  private readonly attempts = new Map<string, number>();
+  protected rebootstraps = 0;
 
   protected constructor(
     protected readonly deps: EngineDeps,
@@ -112,6 +161,11 @@ export abstract class EngineBase {
     this.now = deps.now ?? (() => new Date());
     this.stepTimeoutMs = timeouts.stepTimeoutMs ?? 15_000;
     this.runTimeoutMs = timeouts.runTimeoutMs ?? 600_000;
+    this.budgets = {
+      recoveriesPerStep: timeouts.budgets?.recoveriesPerStep ?? DEFAULT_BUDGETS.recoveriesPerStep,
+      rebootstrapsPerRun:
+        timeouts.budgets?.rebootstrapsPerRun ?? DEFAULT_BUDGETS.rebootstrapsPerRun,
+    };
     this.deadline = Date.now() + this.runTimeoutMs;
   }
 
@@ -119,12 +173,18 @@ export abstract class EngineBase {
 
   protected async bootstrap(): Promise<void> {
     const b = this.deps.profile.bootstrap;
+    // Session-level recoveries make no sense while signing in; everything else still applies.
+    const detectors = this.deps.profile.detectors.filter((d) => d.recovery?.kind !== 'rebootstrap');
     this.currentStep = 'bootstrap';
     await this.navigate(b.entry, 'bootstrap');
     for (const step of b.steps) {
-      await this.runStep(step, this.credentials, this.deps.profile.detectors, true);
+      await this.runStep(step, this.credentials, detectors, true);
     }
-    const ok = await this.waitFor(b.success, this.stepTimeoutMs, 'bootstrap');
+    const ok = await this.waitFor(b.success, this.stepTimeoutMs, 'bootstrap', detectors);
+    if (ok.verdict) {
+      await this.snapshot('bootstrap', ok.obs);
+      this.raise(ok.verdict, 'bootstrap');
+    }
     if (!ok.matched) {
       throw new Stop(
         {
@@ -138,6 +198,51 @@ export abstract class EngineBase {
     }
   }
 
+  /**
+   * Signs in again after a session-level condition and lets the caller re-run the flow from its
+   * entry (D-033). Refuses when a risky step has already executed: re-running could commit twice.
+   */
+  protected async rebootstrap(signal: RebootstrapSignal): Promise<void> {
+    const { condition, stepId } = signal;
+    const routine: RecoveryRoutine = { kind: 'rebootstrap' };
+    const attempt = ++this.rebootstraps;
+    const remaining = Math.max(0, this.budgets.rebootstrapsPerRun - attempt);
+    if (attempt > this.budgets.rebootstrapsPerRun) {
+      await this.recordRecovery(stepId, condition, routine, attempt, 'exhausted', 0);
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'UNEXPECTED_STATE',
+          expected: 'the session to stay signed in for the rest of the run',
+          observed: `condition ${condition.id} matched again at ${stepId}; re-bootstrap budget (${this.budgets.rebootstrapsPerRun} per run) exhausted`,
+        },
+        stepId,
+      );
+    }
+    if (this.riskyExecuted) {
+      await this.recordRecovery(stepId, condition, routine, attempt, 'failed', remaining);
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'UNEXPECTED_STATE',
+          expected: 'no session loss after a risky step',
+          observed: `condition ${condition.id} matched at ${stepId} after a risky step had executed; the flow is not re-run`,
+        },
+        stepId,
+      );
+    }
+    this.log(
+      `recovery: ${condition.id} at ${stepId} → sign in again and re-run the flow from its entry (attempt ${attempt})`,
+    );
+    try {
+      await this.bootstrap();
+    } catch (err) {
+      await this.recordRecovery(stepId, condition, routine, attempt, 'failed', remaining);
+      throw err;
+    }
+    await this.recordRecovery(stepId, condition, routine, attempt, 'recovered', remaining);
+  }
+
   /** Executes one compiled step: preconditions, resolve, gate, act, postcondition, classify. */
   protected async runStep(
     step: Step | BootstrapStep,
@@ -148,13 +253,18 @@ export abstract class EngineBase {
     const stepId = step.id;
     this.currentStep = stepId;
     const started = Date.now();
-    this.log(`step ${stepId}: ${step.intent}`);
+    const attempt = (this.attempts.get(stepId) ?? 0) + 1;
+    this.attempts.set(stepId, attempt);
+    this.log(`step ${stepId}${attempt > 1 ? ` (attempt ${attempt})` : ''}: ${step.intent}`);
 
     for (const pre of step.preconditions) {
-      const w = await this.waitFor(pre, pre.when.timeoutMs ?? 2_000, stepId);
+      const w = await this.waitFor(pre, pre.when.timeoutMs ?? 2_000, stepId, detectors);
+      if (w.verdict) {
+        await this.snapshot(stepId, w.obs);
+        this.raise(w.verdict, stepId);
+      }
       if (!w.matched) {
         await this.snapshot(stepId, w.obs);
-        this.raise(classify(w.obs, { stepId, detectors }), stepId);
         throw new Stop(
           {
             kind: 'failure',
@@ -167,10 +277,7 @@ export abstract class EngineBase {
       }
     }
 
-    const before = await this.observe('before', stepId);
-    const pre = classify(before, { stepId, detectors });
-    if (pre.kind !== 'proceed') await this.snapshot(stepId, before);
-    this.raise(pre, stepId);
+    const before = await this.settled('before', stepId, detectors);
 
     let action = step.action;
     let resolvedBy: number | undefined;
@@ -279,22 +386,23 @@ export abstract class EngineBase {
       step.postcondition,
       step.postcondition.when.timeoutMs ?? this.stepTimeoutMs,
       stepId,
-    );
-    const after = await this.observe('after', stepId);
-    const met = post.matched || evaluatePredicate(step.postcondition.when, after).matched;
-    const c = classify(after, {
-      stepId,
       detectors,
-      postcondition: { condition: step.postcondition, met, detail: post.detail },
+    );
+    if (post.verdict) {
+      await this.snapshot(stepId, post.obs);
+      this.raise(post.verdict, stepId);
+    }
+    const after = await this.settled('after', stepId, detectors, {
+      condition: step.postcondition,
+      met: post.matched,
+      detail: post.detail,
     });
-    if (c.kind !== 'proceed') await this.snapshot(stepId, after);
-    this.raise(c, stepId);
     if (step.risk === 'risky') this.riskyConfirmed = true;
 
     if (!isBootstrap) {
-      this.stepsRun.push({
+      this.report({
         stepId,
-        attempts: 1,
+        attempts: attempt,
         durationMs: Date.now() - started,
         drift,
         ...(resolvedBy !== undefined ? { resolvedBy } : {}),
@@ -304,7 +412,42 @@ export abstract class EngineBase {
     return after;
   }
 
-  /** Turns a non-proceed classification into a Stop. Recoveries (P4) and escalation (P6) are not built yet. */
+  /**
+   * Observes and classifies until the observation is one the step can proceed from: recoverable
+   * conditions are recovered (within budget) and the page observed again; anything else is raised.
+   */
+  private async settled(
+    label: string,
+    stepId: string,
+    detectors: Condition[],
+    post?: { condition: Condition; met: boolean; detail: string },
+  ): Promise<SurfaceObservation> {
+    for (;;) {
+      const obs = await this.observe(label, stepId);
+      const c = classify(obs, {
+        stepId,
+        detectors,
+        ...(post
+          ? {
+              postcondition: {
+                condition: post.condition,
+                met: post.met || evaluatePredicate(post.condition.when, obs).matched,
+                detail: post.detail,
+              },
+            }
+          : {}),
+      });
+      if (c.kind === 'proceed') return obs;
+      if (c.kind === 'recover') {
+        if ((await this.recover(c, stepId, obs)) === 'recovered') continue;
+        throw this.exhausted(c, stepId);
+      }
+      await this.snapshot(stepId, obs);
+      this.raise(c, stepId);
+    }
+  }
+
+  /** Turns a terminal classification into a Stop. Escalation arrives in P6. */
   protected raise(c: Classification, stepId: string): void {
     switch (c.kind) {
       case 'proceed':
@@ -322,7 +465,7 @@ export abstract class EngineBase {
             kind: 'failure',
             failure: 'UNEXPECTED_STATE',
             expected: 'no recoverable condition',
-            observed: `condition ${c.condition.id} matched and needs recovery "${c.routine.kind}" (recovery routines arrive in P4)`,
+            observed: `condition ${c.condition.id} matched where recovery "${c.routine.kind}" cannot run`,
           },
           stepId,
         );
@@ -337,6 +480,116 @@ export abstract class EngineBase {
           stepId,
         );
     }
+  }
+
+  // ---- recoveries ----------------------------------------------------------------------------
+
+  /**
+   * Runs one recovery routine (01 §9). `dismiss` clicks the routine's target; `wait-retry` sleeps
+   * and re-checks the condition up to its attempts; `rebootstrap` raises a signal for the outer
+   * loop. At most `recoveriesPerStep` routines run per step; beyond that the caller fails the step.
+   */
+  protected async recover(
+    c: RecoverClassification,
+    stepId: string,
+    obs: SurfaceObservation,
+  ): Promise<'recovered' | 'exhausted'> {
+    const { condition, routine } = c;
+    if (routine.kind === 'rebootstrap') {
+      await this.snapshot(stepId, obs, `${stepId}-${condition.id}`);
+      throw new RebootstrapSignal(condition, stepId);
+    }
+    const attempt = (this.recoveryCounts.get(stepId) ?? 0) + 1;
+    const remaining = Math.max(0, this.budgets.recoveriesPerStep - attempt);
+    if (attempt > this.budgets.recoveriesPerStep) {
+      await this.recordRecovery(stepId, condition, routine, attempt, 'exhausted', 0);
+      return 'exhausted';
+    }
+    this.recoveryCounts.set(stepId, attempt);
+    await this.snapshot(stepId, obs, `${stepId}-${condition.id}`);
+    this.log(`recovery: ${condition.id} at ${stepId} → ${routine.kind} (attempt ${attempt})`);
+
+    let outcome: Recovery['outcome'] = 'failed';
+    let detail = '';
+    switch (routine.kind) {
+      case 'dismiss': {
+        const r = resolveTarget(obs.nodes, routine.target);
+        if (!r.found) {
+          detail = `dismiss target not found: ${describeTarget(routine.target)}`;
+          break;
+        }
+        const res = await this.deps.surface.act(
+          { kind: 'click', target: { ref: r.ref } },
+          { actor: 'automation', values: {}, baseUrl: this.baseUrl },
+        );
+        if (res.ok) outcome = 'recovered';
+        else detail = `dismiss click failed: ${res.reason}: ${res.detail}`;
+        break;
+      }
+      case 'wait-retry': {
+        for (let i = 0; i < routine.maxAttempts; i++) {
+          await sleep(routine.ms);
+          const again = await this.deps.surface.observe({ screenshot: false });
+          if (!evaluatePredicate(condition.when, again).matched) {
+            outcome = 'recovered';
+            break;
+          }
+        }
+        if (outcome !== 'recovered') {
+          detail = `condition still matched after ${routine.maxAttempts} wait(s) of ${routine.ms} ms`;
+        }
+        break;
+      }
+      case 'assisted':
+        detail = 'assisted fallback is not enabled';
+        break;
+    }
+    await this.recordRecovery(stepId, condition, routine, attempt, outcome, remaining);
+    if (outcome === 'failed') {
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'UNEXPECTED_STATE',
+          expected: `recovery "${routine.kind}" for condition ${condition.id} to succeed`,
+          observed: detail,
+        },
+        stepId,
+      );
+    }
+    return 'recovered';
+  }
+
+  protected exhausted(c: RecoverClassification, stepId: string): Stop {
+    return new Stop(
+      {
+        kind: 'failure',
+        failure: 'UNEXPECTED_STATE',
+        expected: `condition ${c.condition.id} to clear after recovery "${c.routine.kind}"`,
+        observed: `recovery budget (${this.budgets.recoveriesPerStep} per step) exhausted at ${stepId}; the condition still matches`,
+      },
+      stepId,
+    );
+  }
+
+  private async recordRecovery(
+    stepId: string,
+    condition: Condition,
+    routine: RecoveryRoutine,
+    attempt: number,
+    outcome: Recovery['outcome'],
+    budgetRemaining: number,
+  ): Promise<void> {
+    const recovery: Recovery = {
+      stepId,
+      conditionId: condition.id,
+      routine,
+      attempt,
+      outcome,
+      at: this.now().toISOString(),
+    };
+    this.recoveries.push(recovery);
+    await this.event({ type: 'recovery', actor: 'automation', stepId, recovery, budgetRemaining });
+    this.log(`recovery: ${condition.id} at ${stepId} → ${outcome}`);
   }
 
   // ---- surface helpers ---------------------------------------------------------------------
@@ -392,18 +645,41 @@ export abstract class EngineBase {
     return obs;
   }
 
+  /**
+   * Polls until the condition holds or the timeout passes. Detectors are evaluated on every poll
+   * (01 §9): recoverable ones are recovered on the spot and the wait continues, session-level ones
+   * raise the rebootstrap signal, and terminal ones end the wait with a verdict for the caller.
+   */
   protected async waitFor(
     condition: Condition,
     timeoutMs: number,
     stepId: string,
-  ): Promise<{ matched: boolean; obs: SurfaceObservation; detail: string }> {
-    const deadline = Date.now() + Math.max(0, timeoutMs);
+    detectors: Condition[] = [],
+  ): Promise<WaitResult> {
+    let deadline = Date.now() + Math.max(0, timeoutMs);
     let obs: SurfaceObservation;
     let r: { matched: boolean; detail: string };
+    let verdict: Classification | undefined;
     for (;;) {
       obs = await this.deps.surface.observe({ screenshot: false });
       r = evaluatePredicate(condition.when, obs);
-      if (r.matched || Date.now() >= deadline) break;
+      if (r.matched) break;
+      if (detectors.length > 0) {
+        const c = classify(obs, { stepId, detectors });
+        if (c.kind === 'recover') {
+          const started = Date.now();
+          if ((await this.recover(c, stepId, obs)) === 'recovered') {
+            deadline += Date.now() - started;
+            continue;
+          }
+          throw this.exhausted(c, stepId);
+        }
+        if (c.kind !== 'proceed') {
+          verdict = c;
+          break;
+        }
+      }
+      if (Date.now() >= deadline) break;
       await sleep(250);
     }
     this.lastObservation = obs;
@@ -417,13 +693,13 @@ export abstract class EngineBase {
       matched: r.matched,
       ...(condition.code ? { code: condition.code } : {}),
     });
-    return { matched: r.matched, obs, detail: r.detail };
+    return { matched: r.matched, obs, detail: r.detail, verdict };
   }
 
   /** Persists a redacted observation as evidence. */
-  protected async snapshot(stepId: string, obs: SurfaceObservation): Promise<void> {
+  protected async snapshot(stepId: string, obs: SurfaceObservation, name?: string): Promise<void> {
     this.lastSnapshot = await this.run.putJson(
-      `snapshots/${stepId}.json`,
+      `snapshots/${name ?? stepId}.json`,
       redactJson(
         {
           at: obs.at,
@@ -440,6 +716,13 @@ export abstract class EngineBase {
   }
 
   // ---- bookkeeping ---------------------------------------------------------------------------
+
+  /** One report per step id; a re-run after a rebootstrap updates it with the new attempt count. */
+  private report(entry: StepReport): void {
+    const i = this.stepsRun.findIndex((s) => s.stepId === entry.stepId);
+    if (i >= 0) this.stepsRun[i] = entry;
+    else this.stepsRun.push(entry);
+  }
 
   protected checkRunTimeout(): void {
     if (Date.now() > this.deadline) {

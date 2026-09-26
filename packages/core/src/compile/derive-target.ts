@@ -8,10 +8,11 @@ import {
 } from '../resolve/resolve-target.js';
 import type { A11yNode, Baseline, Strategy, TargetSpec } from '../schema/index.js';
 
-/** Text that looks like data rather than a label: numbers, money, dates, ids. */
+/** Text that looks like data rather than a label: numbers, money, dates, ids, bare punctuation. */
 export function looksLikeData(text: string): boolean {
   const t = text.trim();
   if (t === '') return true;
+  if (!/[\p{L}\p{N}]/u.test(t)) return true;
   if (/^[\s$€£(),.\-+%\d]+$/.test(t)) return true;
   if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return true;
   return /^[A-Z0-9-]{6,}$/.test(t) && /\d/.test(t);
@@ -113,7 +114,8 @@ export function deriveTargetSpec(
       }
     }
     const rowAnchor = firstNamedCellInRow(frameNodes, pos.rowPath, node, paramValues);
-    const header = cellAt(frameNodes, `${pos.tablePath}/tr[1]`, pos.col);
+    const headerRow = `${pos.tablePath}/tr[1]`;
+    const header = headerRow === pos.rowPath ? undefined : cellAt(frameNodes, headerRow, pos.col);
     if (
       rowAnchor &&
       header?.name.trim() &&
@@ -130,9 +132,15 @@ export function deriveTargetSpec(
     }
   }
 
-  if (interactive && !keyedRow && !proposals.some((p) => p.kind === 'anchored')) {
-    const left = nearestTextLeft(frameNodes, node, paramValues);
-    if (left) {
+  if (!keyedRow && !proposals.some((p) => p.kind === 'anchored')) {
+    // Interactive controls: the nearest text to the left. Plain cells: the label cell beside them,
+    // which is how a key/value table ("Confirmation number | C-480221") names its values.
+    const left = interactive
+      ? nearestTextLeft(frameNodes, node, paramValues)
+      : pos && pos.col > 1
+        ? cellAt(frameNodes, pos.rowPath, pos.col - 1)
+        : undefined;
+    if (left?.name.trim() && !looksLikeData(left.name) && !containsAny(left.name, paramValues)) {
       proposals.push({
         kind: 'anchored',
         anchor: left.name,

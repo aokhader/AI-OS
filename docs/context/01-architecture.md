@@ -1,6 +1,6 @@
 # 01 · Architecture
 
-Status: stable · Last updated: 2026-09-22
+Status: stable · Last updated: 2026-09-25
 
 This is the load-bearing document. It describes how HandsOff is put together, where the seams are, and why. Every section that makes a choice links to its entry in [08-decision-log.md](08-decision-log.md). Schemas are sketched here and defined in full in [02-tech-stack-and-data-model.md](02-tech-stack-and-data-model.md).
 
@@ -319,13 +319,16 @@ classify(observation, step, budgets):
 
 Precedence, highest first:
 
-1. Session-level and fatal detectors (`rebootstrap`-class recoveries, `fail`-class error pages). A session-expired page that also happens to contain the word "error" is a session expiry.
-2. Known interstitials (`dismiss`-class).
-3. Business outcomes (`outcome`-class) limited to their `atSteps`.
-4. `escalate`-class detectors.
-5. The step's postcondition: satisfied → `proceed`; not satisfied within `timeoutMs` → `CHECKPOINT_FAILED`.
+1. Session-level detectors (`rebootstrap`-class recoveries). A session-expired page that also happens to contain the word "error" is a session expiry.
+2. Fatal detectors (`fail`-class error pages).
+3. Known interstitials (`dismiss`- and `wait-retry`-class).
+4. Business outcomes (`outcome`-class) limited to their `atSteps`.
+5. `escalate`-class detectors.
+6. The step's postcondition: satisfied → `proceed`; not satisfied within `timeoutMs` → `CHECKPOINT_FAILED`.
 
-Budgets are explicit and enforced by the classifier, not by the caller: at most **two recoveries per step** and **one re-bootstrap per run**. Exhaustion converts a `recover` into a `fail` or, if policy says so, an `escalate`. This is what stops a recovery loop from masking a stuck run.
+Detectors are evaluated on every poll of every wait, not only after a step ([D-033](08-decision-log.md#d-033--re-bootstrap-re-runs-the-flow-from-its-entry-and-detectors-are-evaluated-inside-waits)): a `dismiss` or `wait-retry` recovery runs inside the wait and the wait continues, a session-level one raises the re-bootstrap, and a terminal one ends the wait with a verdict the caller raises. A native dialog would otherwise block the wait entirely, and a sign-in or error page would sit out the whole timeout unseen.
+
+Budgets are explicit and enforced by the engine, from `policy.budgets`: at most **two recoveries per step** and **one re-bootstrap per run**. Exhaustion converts a `recover` into a `fail` or, from P6, an `escalate`. This is what stops a recovery loop from masking a stuck run. Re-bootstrap signs in again and re-runs the flow from its entry, counting `attempts` on every step; it refuses after a risky step has executed, since re-running could commit twice.
 
 The classifier is pure: it takes an observation and returns a decision. It is tested over saved observation fixtures from the mock app without a browser, which is where "tested where it counts" (brief §7) is spent.
 
@@ -336,9 +339,9 @@ How the runtime conditions in brief §3.3 are handled:
 | Validation error | capability | `outcome` `VALIDATION_REJECTED` | Stop; return the page's message as `data` |
 | Record not found | capability | `outcome` `MEMBER_NOT_FOUND` | Stop; return outcome |
 | Permission denied | app profile | `outcome` `PERMISSION_DENIED` | Stop; return outcome |
-| Unexpected confirmation or notice dialog | app profile | `recover` `dismiss` | Dismiss, re-observe, re-classify; budget 2 |
-| Session or timeout expiry (login page appears) | app profile | `recover` `rebootstrap` | Re-login once, re-verify the previous step's postcondition, continue |
-| Transient slowness | step postcondition `timeoutMs` + app profile | `recover` `wait-retry` | Wait within timeout, retry once |
+| Unexpected confirmation or notice dialog (a native `alert()`) | app profile | `recover` `dismiss` | Dismiss, re-observe, re-classify; budget 2 |
+| Session or timeout expiry (login page appears) | app profile | `recover` `rebootstrap` | Sign in again once, re-run the flow from its entry, continue |
+| Transient slowness (a "please wait" page that refreshes itself) | step postcondition `timeoutMs` + app profile | `recover` `wait-retry` | Wait 1.5 s, re-check, up to three times |
 | App error page (500) | app profile | `fail` `APP_ERROR` | Stop with screenshot and snapshot |
 | Target missing after all strategies | resolver | `fail` `TARGET_NOT_FOUND` | Stop; strategies tried and nearest candidates in evidence |
 | Anything else unexplained | none matched, postcondition unmet | `fail` `CHECKPOINT_FAILED` or `escalate` per policy | Stop or hand off |
