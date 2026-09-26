@@ -189,7 +189,7 @@ Two capabilities are recorded and replayed:
 | Capability | Inputs | Outputs | Path through the app | Risky | Outcomes exercised |
 |---|---|---|---|---|---|
 | `get-member-savings-balance` | `memberId` (sensitive) | `savingsBalance` (currency, sensitive) | Member search → member detail → read the Savings row of the accounts table | No | `MEMBER_NOT_FOUND` |
-| `open-sub-account` | `memberId` (sensitive), `accountType`, `deposit` | `confirmationNumber` | Member search → member detail → Open sub-account → choose type → enter deposit → submit → confirmation screen | Yes, the submit step carries `confirm: operator` (from P5) | `MEMBER_NOT_FOUND`, `VALIDATION_REJECTED` |
+| `open-sub-account` | `memberId` (sensitive), `accountType`, `deposit` | `confirmationNumber` | Member search → member detail → Open sub-account → choose type → enter deposit → submit → confirmation screen | Yes, the submit step carries `confirm: operator` | `MEMBER_NOT_FOUND`, `VALIDATION_REJECTED` |
 
 Injectable runtime conditions in the mock app, each mapped to a condition class:
 

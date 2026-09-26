@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { createFsStore, ReplayArgumentError, type ReplayResult, replay } from '@handsoff/core';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
-import { loadPolicy } from './policy.js';
+import { resolveOperator } from './operator.js';
+import { requirePolicy } from './policy.js';
 
 export interface ReplayCommandOptions {
   capability: string;
@@ -10,6 +11,7 @@ export interface ReplayCommandOptions {
   chaos?: string | undefined;
   baseUrl?: string | undefined;
   headless?: boolean | undefined;
+  operator?: string | undefined;
   dataDir?: string | undefined;
 }
 
@@ -98,15 +100,29 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
     return 2;
   }
 
+  const loaded = requirePolicy(env);
+  if (!loaded.ok) {
+    console.error(loaded.error);
+    return 2;
+  }
+  const { policy } = loaded;
+  const picked = resolveOperator(opts.operator, env, process.stdin.isTTY === true);
+  if (!picked.ok) {
+    console.error(picked.error);
+    return 2;
+  }
+  const { operator, mode } = picked.value;
+
   const baseUrl = opts.baseUrl ?? env.HANDSOFF_TARGET_URL ?? 'http://localhost:4100';
   const headless = opts.headless ?? env.HANDSOFF_HEADLESS === 'true';
   console.error(
-    `handsoff replay ${capability.id} v${capability.version} against ${baseUrl} (${headless ? 'headless' : 'headed'})`,
+    `handsoff replay ${capability.id} v${capability.version} (${capability.status}) against ${baseUrl} (${headless ? 'headless' : 'headed'}) · operator ${mode}`,
   );
 
   const started = Date.now();
   const surface = await createPlaywrightSurface({
     headless,
+    allowedOrigins: policy.allowedOrigins,
     ...(opts.chaos ? { extraHTTPHeaders: { 'x-handsoff-chaos': opts.chaos } } : {}),
   });
   let result: ReplayResult;
@@ -116,11 +132,11 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
         capability,
         params,
         baseUrl,
+        policy,
         stepTimeoutMs: intEnv('HANDSOFF_STEP_TIMEOUT_MS'),
         runTimeoutMs: intEnv('HANDSOFF_RUN_TIMEOUT_MS'),
-        budgets: loadPolicy(env)?.budgets,
       },
-      { surface, store, profile, env, log: (line) => console.error(`  ${line}`) },
+      { surface, store, profile, env, operator, log: (line) => console.error(`  ${line}`) },
     );
   } catch (err) {
     if (err instanceof ReplayArgumentError) {

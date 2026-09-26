@@ -279,6 +279,7 @@ interface A11yNode {
   framePath: string[];
   path: string;                        // "form[1]/table[1]/tr[2]/td[2]/input[1]"; tbody/thead/tfoot are transparent
   parentRef?: string;
+  formAction?: string;                 // web surfaces: resolved action URL of the enclosing form; the policy gate reads it
 }
 
 /** What the surface returns; the engine persists the PNG and produces an Observation. */
@@ -307,6 +308,7 @@ type RunEvent = { at: string; runId: string; stepId?: string; actor: Actor } & (
   | { type: 'observation';      digest: string; url?: string; title: string; nodeCount: number; dialogCount: number; screenshot?: string }
   | { type: 'decision';         decision: Decision | { kind: 'resolve'; target: TargetSpec } ; intent?: string }
   | { type: 'policy_check';     action: Action; verdict: Verdict; liveRisk: Risk; recordedRisk?: Risk; mismatch: boolean }
+  | { type: 'confirmation';     cause: EscalationCause; rule: string; reason: string; answer: 'approved' | 'denied' | 'unattended'; operatorId?: string }
   | { type: 'action';           action: Action; resolvedBy?: number; candidateCount?: number; durationMs: number }
   | { type: 'condition';        conditionId: string; role: ConditionRole; class?: ConditionClass; matched: boolean; code?: string }
   | { type: 'recovery';         recovery: Recovery; budgetRemaining: number }
@@ -438,7 +440,8 @@ This document defines data. Behaviour lives behind the six port interfaces in [0
 | `Planner` | `@handsoff/llm-anthropic`, `@handsoff/llm-openai`; `ScriptedPlanner` in core for tests; all over the planner protocol in core | one `Decision` per observation during discovery |
 | `RecoveryPlanner` | a planner package, optional | at most one proposed `Action` for a failed replay step |
 | `Store` | filesystem implementation in core (`createFsStore`) | capabilities, runs (a `RunHandle` appends events and writes screenshots, snapshots and the result), escalations, app profiles; everything read from disk is validated with its zod schema |
-| `PolicyGate` | core | `Verdict` for every action before it executes |
+| `PolicyGate` | core (`checkPolicy`, a pure function) | `Verdict`, live risk and mismatch for every action before it executes, in both engines |
+| `Operator` | `handsoff` CLI (terminal, approve-all); console inbox in P6 | answers a `confirm` verdict; absent, replay stops before the step with `ESCALATION_ABANDONED` |
 | `Redactor` | core | masks observations, screenshots, params and transcripts |
 
 ## Example artifact
@@ -591,8 +594,12 @@ Points a reviewer should be able to check from this file alone: what the capabil
     policy.json
   evidence/                             curated copies, committed, never edited
     discovery-run/
+    discovery-run-open-sub-account/
     replay-success/
     replay-member-not-found/
+    replay-session-expiry/
+    replay-confirm-required/
+    discovery-policy-blocked/
     replay-escalation-handoff/
     replay-variant-b/
     capability.get-member-savings-balance.v1.json
@@ -614,7 +621,8 @@ Points a reviewer should be able to check from this file alone: what the capabil
 | `HANDSOFF_FALLBACKS` | `on` | anthropic planner |
 | `HANDSOFF_PORT` | `4000` | embedded server |
 | `HANDSOFF_DATA_DIR` | `./data` | store |
-| `HANDSOFF_POLICY` | `./config/policy.json` | policy gate |
+| `HANDSOFF_POLICY` | `./config/policy.json` | policy gate; the CLI refuses to run without it |
+| `HANDSOFF_OPERATOR` | `tty` in a terminal, `none` otherwise | who answers a `confirm` verdict: `tty`, `none`, `approve-all`; `--operator` overrides |
 | `HANDSOFF_HEADLESS` | `false` | surface |
 | `HANDSOFF_MAX_STEPS` | `30` | discovery |
 | `HANDSOFF_STEP_TIMEOUT_MS` | `15000` | both engines; per-step ceiling on waits |

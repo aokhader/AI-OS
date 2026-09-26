@@ -1,0 +1,17 @@
+{
+  "id": "run_20260925_181915_b473",
+  "kind": "discovery",
+  "goal": {
+    "text": "Find the vendor support portal",
+    "params": {}
+  },
+  "target": {
+    "vendorProductId": "acme-coreteller",
+    "entry": "http://localhost:4100/"
+  },
+  "model": "scripted",
+  "startedAt": "2026-09-26T01:19:15.437Z",
+  "controlOwner": "automation",
+  "sideEffects": "none",
+  "finishedAt": "2026-09-26T01:19:16.676Z"
+}

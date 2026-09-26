@@ -1,0 +1,10 @@
+{
+  "status": "aborted",
+  "reason": "POLICY_BLOCKED: The surface blocked a navigation to an origin outside policy.allowedOrigins",
+  "stepsRecorded": 0,
+  "evidence": {
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_181915_b473",
+    "failingScreenshot": "steps/010-t4-turn.png",
+    "lastObservation": "snapshots/t4.json"
+  }
+}

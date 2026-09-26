@@ -8,6 +8,12 @@ import type {
 } from '../schema/index.js';
 
 /**
+ * Text a surface shows on the page it serves in place of a navigation to an origin outside the
+ * policy allowlist (D-034). Core's runtime detector fails a run that lands on it.
+ */
+export const BLOCKED_NAVIGATION_TEXT = 'Navigation blocked by policy';
+
+/**
  * What a surface returns from observe(). The engine persists the screenshot and adds the digest,
  * producing an `Observation`. Target resolution is a pure function over `nodes` in core
  * (resolve/resolve-target.ts); the surface only has to act on a ref from its latest observation.
@@ -25,6 +31,11 @@ export interface SurfaceObservation {
 export interface ObserveOptions {
   /** Default true. Polling waits skip the screenshot. */
   screenshot?: boolean;
+  /**
+   * Nodes for which this returns true are painted over in the screenshot before it is taken
+   * (D-035). The engine decides what is sensitive; the surface only paints.
+   */
+  mask?: ((node: A11yNode) => boolean) | undefined;
 }
 
 /** Parameter values by name; the surface substitutes `{ param }` values at act time (D-013). */
@@ -41,7 +52,12 @@ export type ActResult =
   | { ok: true; detail?: string }
   | {
       ok: false;
-      reason: 'STALE_REF' | 'ACTION_FAILED' | 'NAVIGATION_FAILED' | 'MISSING_PARAM';
+      reason:
+        | 'STALE_REF'
+        | 'ACTION_FAILED'
+        | 'NAVIGATION_FAILED'
+        | 'NAVIGATION_BLOCKED'
+        | 'MISSING_PARAM';
       detail: string;
     };
 

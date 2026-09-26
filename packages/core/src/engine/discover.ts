@@ -6,6 +6,7 @@ import {
 import { baselineOf, deriveTargetSpec } from '../compile/derive-target.js';
 import { classify } from '../conditions/classify.js';
 import { digestOf } from '../digest.js';
+import { checkPolicy, RUNTIME_DETECTORS } from '../policy/gate.js';
 import type { Planner, PlannerTurn } from '../ports/planner.js';
 import type { ParamValues, SurfaceObservation } from '../ports/surface.js';
 import { redactJson, redactObservation } from '../redact.js';
@@ -13,10 +14,12 @@ import {
   type Action,
   actionParams,
   actionTarget,
+  type Confirm,
   type Decision,
   type DiscoveryResult,
   type InputSpec,
   type RecordedStep,
+  type Risk,
   type Run,
   type Sensitivity,
   type TargetSpec,
@@ -92,9 +95,13 @@ interface PendingStep {
   baseline: ReturnType<typeof baselineOf> | undefined;
   before: SurfaceObservation;
   signature: string;
+  /** The gate's verdict at discovery becomes the step's risk (01 §7). */
+  risk: Risk;
+  confirm: Confirm;
 }
 
 class DiscoveryEngine extends EngineBase {
+  protected override readonly phase = 'discovery';
   private readonly values: ParamValues;
   private readonly steps: DiscoveredStep[] = [];
   private readonly recorded: RecordedStep[] = [];
@@ -138,7 +145,7 @@ class DiscoveryEngine extends EngineBase {
       controlOwner: 'automation',
       sideEffects: 'none',
     };
-    this.run = await this.deps.store.runs.create(run);
+    this.run = await this.deps.store.runs.create(redactJson(run, this.sensitive));
     this.log(`discovery ${run.id} started in ${this.run.dir}`);
 
     let result: DiscoveryResult;
@@ -313,16 +320,59 @@ class DiscoveryEngine extends EngineBase {
       }
     }
 
-    // Policy gate: P5 adds allowlist and live risk classification here (D-015).
+    // The gate (01 §6 step 4, D-034): a block is returned to the model as the result of its
+    // action; a risky action asks the operator and, confirmed, is recorded risky with confirm.
+    const gate = checkPolicy(this.policy, {
+      action,
+      node,
+      observation: obs,
+      phase: 'discovery',
+      baseUrl: this.baseUrl,
+      values: this.values,
+    });
     await this.event({
       type: 'policy_check',
       actor: 'automation',
       stepId,
       action,
-      verdict: { kind: 'allow', risk: 'safe' },
-      liveRisk: 'safe',
+      verdict: gate.verdict,
+      liveRisk: gate.liveRisk,
       mismatch: false,
     });
+    let risk: Risk = 'safe';
+    let confirm: Confirm = 'none';
+    if (gate.verdict.kind === 'block') {
+      this.log(`policy: ${stepId} blocked by ${gate.verdict.rule}: ${gate.verdict.reason}`);
+      return {
+        status: 'blocked',
+        detail: `policy rule ${gate.verdict.rule}: ${gate.verdict.reason}. Choose another route`,
+      };
+    }
+    if (gate.verdict.kind === 'confirm') {
+      const answer = await this.confirm({
+        stepId,
+        intent: decision.intent,
+        action,
+        ...(node ? { target: this.describeNode(node) } : {}),
+        cause: 'CONFIRM_REQUIRED',
+        rule: gate.verdict.rule,
+        reason: gate.verdict.reason,
+      });
+      if (answer.answer === 'denied') {
+        return {
+          status: 'blocked',
+          detail: `the operator denied this risky action (${gate.verdict.reason}). Choose another route or give up`,
+        };
+      }
+      if (answer.answer === 'unattended') {
+        return {
+          status: 'blocked',
+          detail: `this action is risky (${gate.verdict.reason}) and needs an operator's confirmation, but no operator is attached to this run. Choose another route or give up`,
+        };
+      }
+      risk = 'risky';
+      confirm = 'operator';
+    }
 
     const paramValues = Object.values(this.values);
     const target = node ? deriveTargetSpec(node, obs.nodes, paramValues) : undefined;
@@ -343,6 +393,7 @@ class DiscoveryEngine extends EngineBase {
         : {}),
       durationMs: Date.now() - started,
     });
+    if (risk === 'risky') this.riskyExecuted = true;
     if (!r.ok) return { status: 'failed', detail: `${r.reason}: ${r.detail}` };
     await this.settleAfter(obs);
 
@@ -361,6 +412,8 @@ class DiscoveryEngine extends EngineBase {
         baseline,
         before: obs,
         signature,
+        risk,
+        confirm,
       },
     };
   }
@@ -368,6 +421,7 @@ class DiscoveryEngine extends EngineBase {
   /** The observation after an action has arrived: the step is complete and gets recorded. */
   private commit(pending: PendingStep, after: SurfaceObservation): void {
     const id = `s${this.steps.length + 1}`;
+    if (pending.risk === 'risky') this.riskyConfirmed = true;
     this.steps.push({
       intent: pending.intent,
       action: pending.action,
@@ -375,6 +429,8 @@ class DiscoveryEngine extends EngineBase {
       baseline: pending.baseline,
       before: pending.before,
       after,
+      risk: pending.risk,
+      confirm: pending.confirm,
     });
     const recorded: RecordedStep = {
       id,
@@ -391,7 +447,7 @@ class DiscoveryEngine extends EngineBase {
         field: u.field,
         inferred: false,
       })),
-      risk: 'safe',
+      risk: pending.risk,
     };
     this.recorded.push(recorded);
     this.signatures.push(pending.signature);
@@ -432,8 +488,9 @@ class DiscoveryEngine extends EngineBase {
     stepId: string,
   ): Promise<SurfaceObservation> {
     let current = obs;
+    const detectors = [...RUNTIME_DETECTORS, ...this.deps.profile.detectors];
     for (;;) {
-      const c = classify(current, { stepId, detectors: this.deps.profile.detectors });
+      const c = classify(current, { stepId, detectors });
       if (c.kind === 'proceed') return current;
       if (c.kind === 'recover' && c.routine.kind !== 'rebootstrap') {
         if ((await this.recover(c, stepId, current)) !== 'recovered') {
@@ -442,6 +499,7 @@ class DiscoveryEngine extends EngineBase {
         current = await this.observe('turn', stepId);
         continue;
       }
+      await this.snapshot(stepId, current);
       const reason =
         c.kind === 'outcome'
           ? `${c.code}: ${c.message}`

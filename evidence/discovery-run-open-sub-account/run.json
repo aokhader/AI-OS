@@ -1,0 +1,30 @@
+{
+  "id": "run_20260925_181548_c156",
+  "kind": "discovery",
+  "goal": {
+    "text": "Open a new sub-account of type {accountType} with an initial deposit of {deposit} for member {memberId} and return the confirmation number",
+    "params": {
+      "memberId": {
+        "type": "string",
+        "sensitivity": "sensitive"
+      },
+      "accountType": {
+        "type": "string",
+        "sensitivity": "internal"
+      },
+      "deposit": {
+        "type": "string",
+        "sensitivity": "internal"
+      }
+    }
+  },
+  "target": {
+    "vendorProductId": "acme-coreteller",
+    "entry": "http://localhost:4100/"
+  },
+  "model": "gemini-3.5-flash-lite",
+  "startedAt": "2026-09-26T01:15:48.669Z",
+  "controlOwner": "automation",
+  "sideEffects": "committed",
+  "finishedAt": "2026-09-26T01:17:20.520Z"
+}

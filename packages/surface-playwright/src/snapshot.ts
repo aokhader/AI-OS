@@ -18,6 +18,8 @@ export interface RawSnapshotNode {
   bbox: { x: number; y: number; w: number; h: number };
   path: string;
   parentRef?: string;
+  /** Resolved action URL of the enclosing form, for form controls. */
+  formAction?: string;
 }
 
 export interface RawSnapshot {
@@ -229,6 +231,14 @@ export function snapshotDocument(arg: { start: number }): RawSnapshot {
       const value = controlValue(el, role);
       if (value !== undefined) node.value = value;
       if (parentRef) node.parentRef = parentRef;
+      const form = (el as { form?: HTMLFormElement | null }).form;
+      if (form) {
+        const action = form.getAttribute('action');
+        node.formAction = new URL(
+          action?.trim() ? action : location.href,
+          location.href,
+        ).toString();
+      }
       nodes.push(node);
       myRef = ref;
       myRole = role;

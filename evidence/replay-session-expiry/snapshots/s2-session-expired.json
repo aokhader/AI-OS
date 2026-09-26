@@ -1,25 +1,25 @@
 {
-  "at": "2026-09-25T10:04:20.216Z",
-  "url": "http://localhost:4102/",
+  "at": "2026-09-26T01:19:11.719Z",
+  "url": "http://localhost:4100/",
   "title": "First Example Credit Union - ACME CoreTeller",
   "frames": [
     {
       "framePath": [],
-      "url": "http://localhost:4102/",
+      "url": "http://localhost:4100/",
       "title": "First Example Credit Union - ACME CoreTeller"
     },
     {
       "framePath": [
         "nav"
       ],
-      "url": "http://localhost:4102/nav",
+      "url": "http://localhost:4100/nav",
       "title": "First Example Credit Union - ACME CoreTeller - Navigation"
     },
     {
       "framePath": [
         "main"
       ],
-      "url": "http://localhost:4102/login?expired=1",
+      "url": "http://localhost:4100/login?expired=1",
       "title": "First Example Credit Union - ACME CoreTeller - Sign In"
     }
   ],
@@ -234,7 +234,8 @@
         "main"
       ],
       "path": "form[1]/table[1]/tr[1]/td[2]/input[1]",
-      "parentRef": "e12"
+      "parentRef": "e12",
+      "formAction": "http://localhost:4100/login"
     },
     {
       "ref": "e14",
@@ -283,7 +284,8 @@
         "main"
       ],
       "path": "form[1]/table[1]/tr[2]/td[2]/input[1]",
-      "parentRef": "e15"
+      "parentRef": "e15",
+      "formAction": "http://localhost:4100/login"
     },
     {
       "ref": "e17",
@@ -332,12 +334,13 @@
         "main"
       ],
       "path": "form[1]/table[1]/tr[3]/td[2]/input[1]",
-      "parentRef": "e18"
+      "parentRef": "e18",
+      "formAction": "http://localhost:4100/login"
     },
     {
       "ref": "e20",
       "role": "cell",
-      "name": "© ACME CoreTeller. For authorized personnel of First Example Credit Union only. Synthetic data.",
+      "name": "© ACME CoreTeller. For authorized personnel of First Example Credit Union only. Synthetic data. Vendor support",
       "states": [],
       "bbox": {
         "x": 181,
@@ -349,8 +352,25 @@
         "main"
       ],
       "path": "table[2]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e21",
+      "role": "link",
+      "name": "Vendor support",
+      "states": [],
+      "bbox": {
+        "x": 931.65625,
+        "y": 220,
+        "w": 77,
+        "h": 12
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "table[2]/tr[1]/td[1]/font[1]/a[1]",
+      "parentRef": "e20"
     }
   ],
   "dialogs": [],
-  "digest": "a70471cec1653d10007f5f43"
+  "digest": "ce9debab65d15babe6c77e97"
 }

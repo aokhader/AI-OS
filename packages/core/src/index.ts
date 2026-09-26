@@ -12,6 +12,7 @@ export * from './engine/replay.js';
 export * from './engine/values.js';
 export * from './planners/protocol.js';
 export * from './planners/scripted.js';
+export * from './policy/gate.js';
 export * from './ports/index.js';
 export * from './redact.js';
 export * from './resolve/resolve-target.js';

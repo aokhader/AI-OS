@@ -1,0 +1,16 @@
+{
+  "id": "run_20260925_181901_b2ce",
+  "kind": "replay",
+  "capability": {
+    "id": "get-member-savings-balance",
+    "version": 4
+  },
+  "target": {
+    "vendorProductId": "acme-coreteller",
+    "entry": "http://localhost:4100/"
+  },
+  "startedAt": "2026-09-26T01:19:01.067Z",
+  "controlOwner": "automation",
+  "sideEffects": "none",
+  "finishedAt": "2026-09-26T01:19:03.661Z"
+}

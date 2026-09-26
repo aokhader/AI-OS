@@ -1,0 +1,84 @@
+[
+  {
+    "kind": "type",
+    "intent": "Enter the member number into the lookup field",
+    "target": {
+      "strategies": [
+        { "kind": "anchored", "anchor": "Member #", "relation": "labels", "role": "textbox" }
+      ],
+      "framePath": ["main"]
+    },
+    "value": { "param": "memberId" }
+  },
+  {
+    "kind": "click",
+    "intent": "Run the lookup",
+    "target": {
+      "strategies": [{ "kind": "role", "role": "button", "name": "Search" }],
+      "framePath": ["main"]
+    }
+  },
+  {
+    "kind": "click",
+    "intent": "Open the matching member's detail page",
+    "target": {
+      "strategies": [{ "kind": "role", "role": "link", "name": "View" }],
+      "framePath": ["main"]
+    }
+  },
+  {
+    "kind": "click",
+    "intent": "Go to the open sub-account form",
+    "target": {
+      "strategies": [{ "kind": "role", "role": "link", "name": "Open sub-account" }],
+      "framePath": ["main"]
+    }
+  },
+  {
+    "kind": "select",
+    "intent": "Choose the account type from the parameter",
+    "target": {
+      "strategies": [
+        { "kind": "anchored", "anchor": "Account type", "relation": "labels", "role": "combobox" }
+      ],
+      "framePath": ["main"]
+    },
+    "value": { "param": "accountType" }
+  },
+  {
+    "kind": "type",
+    "intent": "Enter the initial deposit from the parameter",
+    "target": {
+      "strategies": [
+        { "kind": "anchored", "anchor": "Initial deposit", "relation": "labels", "role": "textbox" }
+      ],
+      "framePath": ["main"]
+    },
+    "value": { "param": "deposit" }
+  },
+  {
+    "kind": "click",
+    "intent": "Submit the form to open the account",
+    "target": {
+      "strategies": [{ "kind": "role", "role": "button", "name": "Open Account" }],
+      "framePath": ["main"]
+    }
+  },
+  {
+    "kind": "finish",
+    "summary": "The confirmation screen shows the confirmation number of the new sub-account",
+    "outputs": {
+      "confirmationNumber": {
+        "strategies": [
+          {
+            "kind": "anchored",
+            "anchor": "Confirmation number",
+            "relation": "right-of",
+            "role": "cell"
+          }
+        ],
+        "framePath": ["main"]
+      }
+    }
+  }
+]

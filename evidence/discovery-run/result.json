@@ -2,10 +2,10 @@
   "status": "compiled",
   "capability": {
     "id": "get-member-savings-balance",
-    "version": 3
+    "version": 4
   },
   "stepsRecorded": 3,
   "evidence": {
-    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260923_020413_4203"
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_181747_970f"
   }
 }

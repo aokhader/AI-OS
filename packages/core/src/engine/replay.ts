@@ -1,5 +1,7 @@
 import { describePredicate, matchUrl } from '../conditions/predicate.js';
+import { RUNTIME_DETECTORS } from '../policy/gate.js';
 import type { ParamValues, SurfaceObservation } from '../ports/surface.js';
+import { maskOutputs, redactJson } from '../redact.js';
 import { resolveTarget } from '../resolve/resolve-target.js';
 import type { Capability, Condition, FailureKind, ReplayResult, Run } from '../schema/index.js';
 import { newRunId } from '../store/run-id.js';
@@ -58,6 +60,7 @@ export async function replay(options: ReplayOptions, deps: ReplayDeps): Promise<
 }
 
 class ReplayEngine extends EngineBase {
+  protected override readonly phase = 'replay';
   private readonly detectors: Condition[];
 
   constructor(
@@ -66,7 +69,12 @@ class ReplayEngine extends EngineBase {
     credentials: ParamValues,
   ) {
     super(deps, options.baseUrl, options, credentials);
-    this.detectors = [...deps.profile.detectors, ...options.capability.detectors];
+    this.approved = options.capability.status === 'approved';
+    this.detectors = [
+      ...RUNTIME_DETECTORS,
+      ...deps.profile.detectors,
+      ...options.capability.detectors,
+    ];
     this.sensitive = options.capability.inputs
       .filter((i) => i.sensitivity === 'sensitive' || i.sensitivity === 'secret')
       .map((i) => ({ name: i.name, value: options.params[i.name] ?? '' }))
@@ -89,7 +97,7 @@ class ReplayEngine extends EngineBase {
       controlOwner: 'automation',
       sideEffects: 'none',
     };
-    this.run = await this.deps.store.runs.create(run);
+    this.run = await this.deps.store.runs.create(redactJson(run, this.sensitive));
     this.log(`run ${run.id} started in ${this.run.dir}`);
 
     let result: ReplayResult;
@@ -127,12 +135,17 @@ class ReplayEngine extends EngineBase {
       }
     }
 
-    await this.event({ type: 'result', actor: 'automation', result });
+    // Sensitive outputs go to the caller in clear and to disk as hashed placeholders (D-035).
+    const persisted: ReplayResult =
+      result.status === 'success'
+        ? { ...result, outputs: maskOutputs(result.outputs, capability.outputs) }
+        : result;
+    await this.event({ type: 'result', actor: 'automation', result: persisted });
     await this.run.update({
       finishedAt: this.now().toISOString(),
       sideEffects: result.sideEffects,
     });
-    await this.run.finish(result);
+    await this.run.finish(persisted);
     this.log(`run ${run.id} finished: ${result.status}`);
     return result;
   }

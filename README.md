@@ -4,7 +4,7 @@ Computer-use automation for legacy banking software. An LLM figures out how to c
 
 Take-home assessment for interface.ai. The brief is at [docs/description.md](docs/description.md). The project's working knowledge base, read at the start of every session, is [docs/context/](docs/context/README.md).
 
-> Status: P0–P4 complete. Deterministic replay works end to end against the mock app; a real model-driven discovery (Gemini via Google AI Studio) compiled `get-member-savings-balance` v3, which replays to the balance and to the not-found outcome; that run is in [evidence/discovery-run](evidence/discovery-run). Every runtime condition in the brief is injectable in the mock app and answered by the classifier: business outcomes stop with a code, interstitials, busy pages and session expiry are recovered and reported, error pages fail with evidence. The console lists runs and capabilities. Next: P5 policy gate, redaction and screenshot masking. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
+> Status: P0–P5 complete. Deterministic replay works end to end against the mock app; real model-driven discoveries (Gemini via Google AI Studio) compiled `get-member-savings-balance` v4 and the write flow `open-sub-account` v2, whose submit the policy gate classified risky and an operator confirmed at discovery; those runs are in [evidence/discovery-run](evidence/discovery-run) and [evidence/discovery-run-open-sub-account](evidence/discovery-run-open-sub-account). Every runtime condition in the brief is injectable in the mock app and answered by the classifier. Every action passes the policy gate before it executes, off-allowlist navigations are refused at the gate and at the network layer, and nothing persisted shows a sensitive value: screenshots are masked, logs carry hashed placeholders, sensitive outputs are masked in `result.json`. The console lists runs and capabilities. Next: P6 escalation and handoff. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
 
 ## Layout
 
@@ -14,7 +14,7 @@ packages/surface-playwright  Surface implementation over Playwright        (P1)
 packages/llm-anthropic       Planner over the Anthropic SDK                        (P2)
 packages/llm-openai          Planner over the OpenAI protocol: Google AI Studio,
                              Groq, OpenRouter, Ollama, any compatible endpoint     (P2)
-apps/runner                  `handsoff` CLI: discover, replay, serve (API)   (P1–P3)
+apps/runner                  `handsoff` CLI: discover, replay, approve, serve  (P1–P5)
 apps/operator-console        Vite + React operator console                 (P3+)
 apps/legacy-bank             mock legacy credit-union app, the target      (P0)
 config/policy.json           allowlist and risk policy
@@ -57,13 +57,23 @@ pnpm handsoff replay --capability get-member-savings-balance --param memberId=10
 pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --chaos error            # failure APP_ERROR at s2 with screenshot and snapshot
 ```
 
-Other modes: `not-found` and `slow` (busy page waited out with wait-retry). The second capability, `open-sub-account`, was discovered by a model too and exercises the write path; `validation` rejects its submit once:
+Other modes: `not-found` and `slow` (busy page waited out with wait-retry). Recoveries never change the result status; they are listed in `recoveries` and in the run's event log.
+
+Every action passes the policy gate in [config/policy.json](config/policy.json) before it executes: the action kind, the origin and route of a navigation, and the live risk of the control (button text, form action, route). The second capability, `open-sub-account`, was discovered by a model too and exercises the write path: its submit classified risky, so the artifact carries `risk: risky, confirm: operator` on s7, and every replay pauses there for an operator. In a terminal the CLI asks you (`--operator tty`, the default); unattended, the run stops before the step with nothing committed:
 
 ```bash
-pnpm handsoff replay --capability open-sub-account --param memberId=10001 --param "accountType=Checking" --param deposit=40.00 --chaos validation   # outcome VALIDATION_REJECTED at s7, exit 3
+pnpm handsoff approve --capability open-sub-account      # the reviewer's step; a risky step on a draft capability is POLICY_BLOCKED
 ```
 
-Recoveries never change the result status; they are listed in `recoveries` and in the run's event log.
+```bash
+pnpm handsoff replay --capability open-sub-account --param memberId=10001 --param accountType=Checking --param deposit=40.00 --operator none          # failure ESCALATION_ABANDONED at s7, side effects none, exit 1
+```
+
+```bash
+pnpm handsoff replay --capability open-sub-account --param memberId=10001 --param accountType=Checking --param deposit=40.00 --operator approve-all   # success with a confirmation number, side effects committed
+```
+
+`--operator approve-all` stands in for an operator who pre-approved the run; add `--chaos validation` to see the submit rejected once (`outcome VALIDATION_REJECTED` at s7, exit 3). Navigations outside the allowlist are refused twice: by the gate, which tells the model or fails the replay with `POLICY_BLOCKED`, and by the browser layer, which answers any request to another origin with a block page ([evidence/discovery-policy-blocked](evidence/discovery-policy-blocked) shows both). Sensitive parameter values never reach the model or the disk: the model sees `{memberId}`, everything persisted carries `«memberId#sha256:…»`, screenshots are painted over wherever the value shows, and sensitive outputs are masked in `result.json` while the caller gets the real value on stdout.
 
 Discover a capability with a model. Put a key for any supported provider in `.env`; the free Google AI Studio tier is enough:
 
@@ -79,7 +89,7 @@ Other providers: `anthropic` (`ANTHROPIC_API_KEY`), `openai` (`OPENAI_API_KEY`),
 pnpm handsoff discover --goal "Look up member {memberId} and return the current balance of the Savings account" --param memberId=10001 --sensitive memberId --describe "memberId=Member number as printed on the member card" --id get-member-savings-balance --outcome "MEMBER_NOT_FOUND=No matching member"
 ```
 
-The run folder holds every observation, decision, policy check and action, the screenshots, and the model transcript with parameter values redacted. The compiled capability is written as the next version of the id and replays with the command above. To keep a run as submission evidence:
+The run folder holds every observation, decision, policy check, confirmation and action, the masked screenshots, and the model transcript with parameter values redacted. Discovering a write flow with a model asks the operator before the risky step, so run it in a terminal or pass `--operator approve-all`. The compiled capability is written as the next version of the id and replays with the command above. To keep a run as submission evidence:
 
 ```bash
 pnpm evidence:copy <runId> discovery-run
@@ -106,8 +116,8 @@ Runs show their result, step reports and a timeline with screenshots; capabiliti
 Checks:
 
 ```bash
-pnpm test               # schema, resolver, classifier, compiler, planner, API and mock-app tests; no browser, no API key
-pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, and every chaos mode; no API key
+pnpm test               # schema, resolver, classifier, compiler, policy gate, redaction, planner, API and mock-app tests; no browser, no API key
+pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, every chaos mode, the gate at both layers, masking and the confirmation paths; no API key
 pnpm typecheck
 pnpm lint
 ```

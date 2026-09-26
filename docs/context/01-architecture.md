@@ -7,7 +7,7 @@ This is the load-bearing document. It describes how HandsOff is put together, wh
 ## 1. Principles
 
 1. **The model is in the loop only at discovery.** Replay is deterministic. The single exception is the optional, bounded assisted-fallback step (§15), and the dependency graph makes any other model call impossible ([D-023](08-decision-log.md#d-023--core-has-no-runtime-dependencies-llm-adapter-is-a-separate-package)).
-2. **Every seam is an interface in `@handsoff/core`.** Surface, planner, store, policy gate and redactor are ports. Runtime-specific code (Playwright, the model SDKs, the filesystem) lives in adapter packages.
+2. **Every seam is an interface in `@handsoff/core`.** Surface, planner, store, policy gate, operator and redactor are ports. Runtime-specific code (Playwright, the model SDKs, the filesystem) lives in adapter packages.
 3. **Errors are data across seams.** Engines return discriminated unions. Exceptions mean bugs, not business conditions.
 4. **Evidence is a by-product of the normal path.** Every observation, decision, policy verdict, action and condition is an event in the run log. Nothing is added "for debugging" later.
 5. **Thin-but-real for every brief requirement; design for scale, do not build it.** Where we stop, there is a named interface and a paragraph on what the real-scale version looks like.
@@ -168,11 +168,17 @@ interface Store {
   appProfiles:  { get; list };
 }
 
-interface PolicyGate { check(action: Action, observation: Observation, phase: 'discovery' | 'replay', step?: Step): Verdict; }
+// The gate is a pure function in core (policy/gate.ts); `recorded` is what the artifact says, replay only.
+function checkPolicy(policy: Policy, input: { action: Action; node?: A11yNode; observation: Observation; phase: 'discovery' | 'replay'; baseUrl: string; values: ParamValues; recorded?: { risk: Risk; confirm: Confirm; approved: boolean } }): { verdict: Verdict; liveRisk: Risk; mismatch: boolean };
 type Verdict =
   | { kind: 'allow'; risk: 'safe' | 'risky' }
   | { kind: 'block'; rule: string; reason: string }
   | { kind: 'confirm'; rule: string; reason: string };  // risky and requires an operator
+
+interface Operator {              // answers `confirm` verdicts (D-034); the CLI from the terminal, the console from P6
+  info(): { id: string };
+  confirm(request: ConfirmRequest): Promise<'approved' | 'denied'>;
+}
 
 interface Redactor {
   observation(o: Observation, bindings: Binding[]): Observation;
@@ -444,19 +450,22 @@ Policy is one file, `config/policy.json` ([D-015](08-decision-log.md#d-015--risk
 
 Patterns in `riskyPatterns` are regular expressions or globs matched case-insensitively by the gate; there is no inline-flag syntax in JavaScript regular expressions, so the flag lives in the code, not the config.
 
-**One enforcement point.** `PolicyGate.check` runs before every `act` in both engines. It checks the action type, the origin and route of any navigation, and classifies **risk from the live observation**: the accessible name of the button, the form's action, the current route. A step recorded as `safe` whose live classification is `risky` produces a `policy_mismatch` event and is treated as risky. Approval is therefore a second guard, not the only one.
+**One enforcement point.** `checkPolicy` runs before every `act` in both engines: capability steps, the app profile's bootstrap steps, entry navigations and recovery clicks. It checks the action kind, the origin and route of any navigation, and classifies **risk from the live observation**: the accessible name of the button (`riskyPatterns.buttonText`, case-insensitive regular expressions), the action of the form the control belongs to (`riskyPatterns.formAction`, which web surfaces report on every form control as `A11yNode.formAction`), and the current or target route (`riskyPatterns.routes`). At replay the effective risk is the higher of the recorded and the live risk, and any disagreement is a `policy_check` event with `mismatch: true`. Approval is therefore a second guard, not the only one ([D-034](08-decision-log.md#d-034--policy-gate-verdicts-at-replay-a-risk-mismatch-requires-confirmation-operator-confirmation-is-a-port)).
 
 **Risk handling.**
 
-- Discovery: a `risky` verdict becomes `confirm` and escalates (`riskyMode.discovery: escalate`) or is blocked. The model is told why.
-- Replay: risky steps execute only if the capability is `approved` **and** the step's `confirm` is `none`. Steps with `confirm: 'operator'` always escalate with `CONFIRM_REQUIRED`, approved or not.
-- Belt and braces: Playwright request routing blocks any top-level navigation to an origin outside `allowedOrigins` at the network layer, so even a bug in the gate cannot leave the allowlist.
+- Discovery: a `risky` verdict is `confirm` under `riskyMode.discovery: escalate` and `block` under `block`. A confirmed step compiles with `risk: risky, confirm: operator`. Blocked and unconfirmed actions are returned to the model as the result of its action, with the rule, so it can pick another route.
+- Replay: a step recorded `safe` that classifies `risky` live is `confirm` whatever the capability's status, because approval covered an artifact that did not declare the risk. A recorded risky step on an unapproved capability is `block` (`riskyMode.replay: require_approved`); on an approved capability it is `allow` when `confirm` is `none` and `confirm` when it is `operator`.
+- A `confirm` verdict is answered by the `Operator` port. The CLI attaches a terminal operator when stdin is a TTY (`--operator tty`), answers yes to everything under `--operator approve-all` (an attended discovery of a write flow), and attaches none under `--operator none`. With no operator attached, replay stops **before** the step with `ESCALATION_ABANDONED` and `sideEffects: none`; P6 turns this into the escalation record, the console inbox and the abandonment timeout. Every answer, including the unattended case, is a `confirmation` event.
+- Recovery routines never perform risky actions: a `confirm` verdict on a dismiss click fails the recovery.
+- Belt and braces: the surface intercepts every navigation request (top document or frame, GET or form POST) to an origin outside `allowedOrigins` and answers it with a 403 page whose heading is a contract exported by core (`BLOCKED_NAVIGATION_TEXT`). A direct `navigate` to such an origin comes back as `NAVIGATION_BLOCKED`, and a runtime detector in core fails any run that lands on the page with `POLICY_BLOCKED`. Even a bug in the gate cannot take the session off the allowlist, and a clicked external link (a link's target is not in the accessibility snapshot, so the gate cannot see it) ends as a classified failure with evidence rather than a browser error page.
 
 **Redaction.** Every input and output carries `sensitivity: 'public' | 'internal' | 'sensitive' | 'secret'`.
 
-- `sensitive` and `secret` parameter values are never written to the artifact (only the binding), are hashed (`sha256` prefix) in the event log, and are masked in screenshots by painting over the bounding boxes of the fields they were typed into.
-- Values of accessibility nodes bound to sensitive parameters are replaced in the observation before it reaches the model or the log.
-- Outputs marked `sensitive` are returned in-process to the caller and masked in the persisted `result.json`.
+- `sensitive` and `secret` parameter values are never written to the artifact (only the binding). In everything persisted (events, snapshots, the transcript, `run.json`) every occurrence becomes `«name#sha256:xxxxxxxxxxxx»`, twelve hex characters of the digest, so an audit can tell two runs on the same value apart without storing it; the model sees the bare `«name»` ([D-035](08-decision-log.md#d-035--redaction-mechanics-hashed-placeholders-in-persisted-text-overlay-masking-in-screenshots-masked-outputs-in-resultjson)). A sha256 prefix of a five-digit member number is brute-forceable: it is a correlation handle, not encryption.
+- Screenshots are masked at capture time: the engine hands the surface a predicate over accessibility nodes (name or value shows a sensitive value) and the surface paints opaque overlays over those elements inside their own frames, takes the screenshot, then removes them. No image code in core; framesets handled for free.
+- Values of accessibility nodes showing sensitive values are replaced in the observation before it reaches the model or the log.
+- Outputs marked `sensitive` or `secret` are returned in-process to the caller as parsed values and written to `result.json` and the `result` event as the same hashed placeholder.
 - The model transcript is persisted only after redaction. The raw transcript is never written.
 - Credentials exist only in environment variables and are used by the app profile's bootstrap routine, which is not part of any capability.
 

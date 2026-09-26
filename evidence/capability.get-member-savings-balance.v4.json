@@ -3,15 +3,15 @@
   "id": "get-member-savings-balance",
   "name": "Look up member {memberId} and return the current balance of the Savings account",
   "description": "Look up member {memberId} and return the current balance of the Savings account",
-  "version": 3,
-  "supersedes": 2,
+  "version": 4,
+  "supersedes": 3,
   "status": "draft",
   "provenance": {
-    "runId": "run_20260923_020413_4203",
+    "runId": "run_20260925_181747_970f",
     "provider": "google",
-    "model": "gemini-3.8-flash",
+    "model": "gemini-3.5-flash-lite",
     "effort": "high",
-    "recordedAt": "2026-09-23T09:04:54.473Z",
+    "recordedAt": "2026-09-26T01:18:29.912Z",
     "compiler": "handsoff@0.1.0"
   },
   "app": {
@@ -74,7 +74,7 @@
   "steps": [
     {
       "id": "s1",
-      "intent": "Enter member ID into search input",
+      "intent": "Enter member ID to search",
       "action": {
         "kind": "type",
         "target": {
@@ -233,7 +233,7 @@
     },
     {
       "id": "s3",
-      "intent": "View member details",
+      "intent": "Click View link for member",
       "action": {
         "kind": "click",
         "target": {

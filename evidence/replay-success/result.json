@@ -1,0 +1,49 @@
+{
+  "status": "success",
+  "outputs": {
+    "savingsBalance": "«savingsBalance#sha256:096175fe1de6»"
+  },
+  "capability": {
+    "id": "get-member-savings-balance",
+    "version": 4
+  },
+  "stepsRun": [
+    {
+      "stepId": "s1",
+      "attempts": 1,
+      "durationMs": 103,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s2",
+      "attempts": 1,
+      "durationMs": 164,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s3",
+      "attempts": 1,
+      "durationMs": 137,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s4",
+      "attempts": 1,
+      "durationMs": 114,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    }
+  ],
+  "recoveries": [],
+  "sideEffects": "none",
+  "evidence": {
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_181901_b2ce"
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "at": "2026-09-26T01:19:16.635Z",
+  "url": "http://localhost:4100/",
+  "title": "First Example Credit Union - ACME CoreTeller",
+  "frames": [
+    {
+      "framePath": [],
+      "url": "http://localhost:4100/",
+      "title": "First Example Credit Union - ACME CoreTeller"
+    },
+    {
+      "framePath": [
+        "nav"
+      ],
+      "url": "http://localhost:4100/nav",
+      "title": "First Example Credit Union - ACME CoreTeller - Navigation"
+    },
+    {
+      "framePath": [
+        "main"
+      ],
+      "url": "https://support.example.com/coreteller",
+      "title": "Navigation blocked by policy"
+    }
+  ],
+  "nodes": [
+    {
+      "ref": "e1",
+      "role": "cell",
+      "name": "First Example Credit Union | ACME CoreTeller 7.4.2",
+      "states": [],
+      "bbox": {
+        "x": 8,
+        "y": 8,
+        "w": 154,
+        "h": 72
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[1]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e2",
+      "role": "cell",
+      "name": "Menu",
+      "states": [],
+      "bbox": {
+        "x": 9,
+        "y": 96,
+        "w": 152,
+        "h": 23
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e3",
+      "role": "cell",
+      "name": "Member Lookup",
+      "states": [],
+      "bbox": {
+        "x": 9,
+        "y": 119,
+        "w": 152,
+        "h": 23
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[2]/td[1]"
+    },
+    {
+      "ref": "e4",
+      "role": "link",
+      "name": "Member Lookup",
+      "states": [],
+      "bbox": {
+        "x": 13,
+        "y": 123,
+        "w": 96.328125,
+        "h": 15
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[2]/td[1]/a[1]",
+      "parentRef": "e3"
+    },
+    {
+      "ref": "e5",
+      "role": "cell",
+      "name": "Sign out",
+      "states": [],
+      "bbox": {
+        "x": 9,
+        "y": 142,
+        "w": 152,
+        "h": 23
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[3]/td[1]"
+    },
+    {
+      "ref": "e6",
+      "role": "link",
+      "name": "Sign out",
+      "states": [],
+      "bbox": {
+        "x": 13,
+        "y": 146,
+        "w": 50.390625,
+        "h": 15
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[2]/tr[3]/td[1]/a[1]",
+      "parentRef": "e5"
+    },
+    {
+      "ref": "e7",
+      "role": "cell",
+      "name": "Teller: teller",
+      "states": [],
+      "bbox": {
+        "x": 8,
+        "y": 181,
+        "w": 154,
+        "h": 20
+      },
+      "framePath": [
+        "nav"
+      ],
+      "path": "table[3]/tr[1]/td[1]"
+    },
+    {
+      "ref": "e8",
+      "role": "heading",
+      "name": "Navigation blocked by policy",
+      "states": [],
+      "bbox": {
+        "x": 205,
+        "y": 32,
+        "w": 1043,
+        "h": 37
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "h1[1]"
+    },
+    {
+      "ref": "e9",
+      "role": "text",
+      "name": "HandsOff did not allow a navigation to : the origin is not in the policy allowlist.",
+      "states": [],
+      "bbox": {
+        "x": 205,
+        "y": 90.4375,
+        "w": 1043,
+        "h": 18
+      },
+      "framePath": [
+        "main"
+      ],
+      "path": "p[1]"
+    }
+  ],
+  "dialogs": [],
+  "digest": "8624e9d02c7f8e3ddb5ce6d9"
+}

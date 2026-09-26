@@ -1,18 +1,30 @@
 import { type Classification, classify } from '../conditions/classify.js';
 import { describePredicate, evaluatePredicate } from '../conditions/predicate.js';
 import { digestOf } from '../digest.js';
+import {
+  checkPolicy,
+  type GateResult,
+  type Phase,
+  permissivePolicy,
+  RECORDED_SAFE_APPROVED,
+} from '../policy/gate.js';
+import type { ConfirmRequest, Operator } from '../ports/operator.js';
 import type { RunHandle, Store } from '../ports/store.js';
 import type { ParamValues, Surface, SurfaceObservation } from '../ports/surface.js';
-import { redactJson, type SensitiveValue } from '../redact.js';
+import { redactJson, redactText, type SensitiveValue, shouldMask } from '../redact.js';
 import { describeTarget, resolveTarget } from '../resolve/resolve-target.js';
 import {
+  type A11yNode,
+  type Action,
   type AppProfile,
   actionTarget,
   type BootstrapStep,
   type Condition,
   type FailureKind,
+  type Policy,
   type Recovery,
   type RecoveryRoutine,
+  type Risk,
   type RunEvent,
   type SideEffects,
   type Step,
@@ -31,6 +43,8 @@ export interface EngineDeps {
   profile: AppProfile;
   /** Where bootstrap credentials are read from. Defaults to process.env. */
   env?: Record<string, string | undefined> | undefined;
+  /** Answers `confirm` verdicts (D-034). Without one, replay stops before a risky step. */
+  operator?: Operator | undefined;
   now?: (() => Date) | undefined;
   log?: ((line: string) => void) | undefined;
 }
@@ -44,7 +58,10 @@ export interface EngineBudgets {
 export interface EngineTimeouts {
   stepTimeoutMs?: number | undefined;
   runTimeoutMs?: number | undefined;
+  /** Overrides `policy.budgets`. */
   budgets?: EngineBudgets | undefined;
+  /** config/policy.json. Default: locked to the target origin, nothing risky (see permissivePolicy). */
+  policy?: Policy | undefined;
 }
 
 export interface ResolvedBudgets {
@@ -131,9 +148,13 @@ export function credentialsFromEnv(
  */
 export abstract class EngineBase {
   protected run!: RunHandle;
+  protected abstract readonly phase: Phase;
   protected readonly now: () => Date;
   protected readonly stepTimeoutMs: number;
   protected readonly runTimeoutMs: number;
+  protected readonly policy: Policy;
+  /** Replay: the capability's status is `approved`. Bootstrap and entry always count as approved. */
+  protected approved = false;
   protected readonly budgets: ResolvedBudgets;
   protected readonly deadline: number;
   protected shots = 0;
@@ -161,10 +182,18 @@ export abstract class EngineBase {
     this.now = deps.now ?? (() => new Date());
     this.stepTimeoutMs = timeouts.stepTimeoutMs ?? 15_000;
     this.runTimeoutMs = timeouts.runTimeoutMs ?? 600_000;
+    this.policy = timeouts.policy ?? permissivePolicy(baseUrl);
+    const origin = new URL(baseUrl).origin;
+    if (!this.policy.allowedOrigins.some((o) => new URL(o).origin === origin)) {
+      throw new EngineArgumentError(
+        `target origin ${origin} is not in policy.allowedOrigins (${this.policy.allowedOrigins.join(', ')})`,
+      );
+    }
     this.budgets = {
-      recoveriesPerStep: timeouts.budgets?.recoveriesPerStep ?? DEFAULT_BUDGETS.recoveriesPerStep,
+      recoveriesPerStep:
+        timeouts.budgets?.recoveriesPerStep ?? this.policy.budgets.recoveriesPerStep,
       rebootstrapsPerRun:
-        timeouts.budgets?.rebootstrapsPerRun ?? DEFAULT_BUDGETS.rebootstrapsPerRun,
+        timeouts.budgets?.rebootstrapsPerRun ?? this.policy.budgets.rebootstrapsPerRun,
     };
     this.deadline = Date.now() + this.runTimeoutMs;
   }
@@ -280,6 +309,7 @@ export abstract class EngineBase {
     const before = await this.settled('before', stepId, detectors);
 
     let action = step.action;
+    let node: A11yNode | undefined;
     let resolvedBy: number | undefined;
     let candidateCount: number | undefined;
     let drift = false;
@@ -320,6 +350,7 @@ export abstract class EngineBase {
           stepId,
         );
       }
+      node = res.node;
       resolvedBy = res.resolvedBy;
       candidateCount = res.candidateCount;
       if ('baseline' in step) {
@@ -340,16 +371,37 @@ export abstract class EngineBase {
       action = withRef(step.action, res.ref);
     }
 
-    // Policy gate: P5 replaces this with live risk classification (D-015).
+    // The gate (D-015, D-034): action allowlist, origin and route of a navigation, live risk
+    // against the recorded risk. Profile steps count as approved; capability steps need the review.
+    const gate = checkPolicy(this.policy, {
+      action,
+      node,
+      observation: before,
+      phase: 'replay',
+      baseUrl: this.baseUrl,
+      values,
+      recorded: { risk: step.risk, confirm: step.confirm, approved: isBootstrap || this.approved },
+    });
     await this.event({
       type: 'policy_check',
       actor: 'automation',
       stepId,
       action: step.action,
-      verdict: { kind: 'allow', risk: step.risk },
-      liveRisk: step.risk,
+      verdict: gate.verdict,
+      liveRisk: gate.liveRisk,
       recordedRisk: step.risk,
-      mismatch: false,
+      mismatch: gate.mismatch,
+    });
+    if (gate.mismatch) {
+      this.log(`policy: ${stepId} is recorded ${step.risk} but classifies ${gate.liveRisk} live`);
+    }
+    // A refusal stops the run here: keep the page it was refused on as evidence.
+    if (gate.verdict.kind !== 'allow') await this.snapshot(stepId, before);
+    const risk = await this.enforce(gate, {
+      stepId,
+      intent: step.intent,
+      action: step.action,
+      ...(node ? { target: this.describeNode(node) } : {}),
     });
 
     if (step.action.kind !== 'extract') {
@@ -358,13 +410,18 @@ export abstract class EngineBase {
         values,
         baseUrl: this.baseUrl,
       });
-      if (step.risk === 'risky') this.riskyExecuted = true;
+      if (risk === 'risky') this.riskyExecuted = true;
       if (!r.ok) {
         await this.snapshot(stepId, before);
         throw new Stop(
           {
             kind: 'failure',
-            failure: r.reason === 'NAVIGATION_FAILED' ? 'APP_ERROR' : 'UNEXPECTED_STATE',
+            failure:
+              r.reason === 'NAVIGATION_BLOCKED'
+                ? 'POLICY_BLOCKED'
+                : r.reason === 'NAVIGATION_FAILED'
+                  ? 'APP_ERROR'
+                  : 'UNEXPECTED_STATE',
             expected: `${step.action.kind} to succeed`,
             observed: `${r.reason}: ${r.detail}`,
           },
@@ -397,7 +454,7 @@ export abstract class EngineBase {
       met: post.matched,
       detail: post.detail,
     });
-    if (step.risk === 'risky') this.riskyConfirmed = true;
+    if (risk === 'risky') this.riskyConfirmed = true;
 
     if (!isBootstrap) {
       this.report({
@@ -482,6 +539,96 @@ export abstract class EngineBase {
     }
   }
 
+  // ---- policy --------------------------------------------------------------------------------
+
+  /**
+   * Acts on a verdict (D-034). `allow` returns the effective risk; `block` stops the run before
+   * anything executes; `confirm` asks the operator, and with none attached the run ends with
+   * `ESCALATION_ABANDONED`, since it needed a human and had none. Nothing has run: `sideEffects`
+   * stays `none`.
+   */
+  protected async enforce(
+    gate: GateResult,
+    ctx: { stepId: string; intent: string; action: Action; target?: string | undefined },
+  ): Promise<Risk> {
+    const v = gate.verdict;
+    if (v.kind === 'allow') return v.risk;
+    if (v.kind === 'block') {
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'POLICY_BLOCKED',
+          expected: `${ctx.action.kind} at ${ctx.stepId} to pass policy rule ${v.rule}`,
+          observed: v.reason,
+        },
+        ctx.stepId,
+      );
+    }
+    const answer = await this.confirm({
+      ...ctx,
+      cause: 'CONFIRM_REQUIRED',
+      rule: v.rule,
+      reason: v.reason,
+    });
+    if (answer.answer === 'approved') return 'risky';
+    if (answer.answer === 'denied') {
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'POLICY_BLOCKED',
+          expected: `operator ${answer.operatorId} to approve ${ctx.stepId}`,
+          observed: `${v.reason}; the operator denied it`,
+        },
+        ctx.stepId,
+      );
+    }
+    throw new Stop(
+      {
+        kind: 'failure',
+        failure: 'ESCALATION_ABANDONED',
+        expected: `an operator to confirm ${ctx.stepId} (CONFIRM_REQUIRED)`,
+        observed: `${v.reason}; no operator is attached to this run`,
+      },
+      ctx.stepId,
+    );
+  }
+
+  /** Asks the attached operator, if any, and records the answer as a `confirmation` event. */
+  protected async confirm(
+    req: Omit<ConfirmRequest, 'runId' | 'phase' | 'screenshot'>,
+  ): Promise<{ answer: 'approved' | 'denied' | 'unattended'; operatorId?: string }> {
+    const operator = this.deps.operator;
+    let answer: 'approved' | 'denied' | 'unattended' = 'unattended';
+    if (operator) {
+      this.log(
+        `confirmation: ${req.cause} at ${req.stepId} (${req.reason}) → asking operator ${operator.info().id}`,
+      );
+      answer = await operator.confirm({
+        runId: this.run.id,
+        phase: this.phase,
+        ...req,
+        ...(this.lastScreenshot ? { screenshot: this.lastScreenshot } : {}),
+      });
+    }
+    await this.event({
+      type: 'confirmation',
+      actor: answer === 'unattended' ? 'automation' : 'human',
+      stepId: req.stepId,
+      cause: req.cause,
+      rule: req.rule,
+      reason: req.reason,
+      answer,
+      ...(operator ? { operatorId: operator.info().id } : {}),
+    });
+    this.log(`confirmation: ${req.cause} at ${req.stepId} → ${answer}`);
+    return { answer, ...(operator ? { operatorId: operator.info().id } : {}) };
+  }
+
+  /** `button "Open Account"`, with sensitive values redacted for the operator's terminal. */
+  protected describeNode(node: A11yNode): string {
+    return redactText(`${node.role} "${node.name}"`, this.sensitive);
+  }
+
   // ---- recoveries ----------------------------------------------------------------------------
 
   /**
@@ -518,10 +665,35 @@ export abstract class EngineBase {
           detail = `dismiss target not found: ${describeTarget(routine.target)}`;
           break;
         }
-        const res = await this.deps.surface.act(
-          { kind: 'click', target: { ref: r.ref } },
-          { actor: 'automation', values: {}, baseUrl: this.baseUrl },
-        );
+        // Recovery routines never perform risky actions (D-034).
+        const click: Action = { kind: 'click', target: { ref: r.ref } };
+        const gate = checkPolicy(this.policy, {
+          action: click,
+          node: r.node,
+          observation: obs,
+          phase: 'replay',
+          baseUrl: this.baseUrl,
+          values: {},
+          recorded: RECORDED_SAFE_APPROVED,
+        });
+        await this.event({
+          type: 'policy_check',
+          actor: 'automation',
+          stepId,
+          action: click,
+          verdict: gate.verdict,
+          liveRisk: gate.liveRisk,
+          mismatch: gate.mismatch,
+        });
+        if (gate.verdict.kind !== 'allow') {
+          detail = `dismiss click refused by policy (${gate.verdict.rule}): ${gate.verdict.reason}`;
+          break;
+        }
+        const res = await this.deps.surface.act(click, {
+          actor: 'automation',
+          values: {},
+          baseUrl: this.baseUrl,
+        });
         if (res.ok) outcome = 'recovered';
         else detail = `dismiss click failed: ${res.reason}: ${res.detail}`;
         break;
@@ -594,9 +766,28 @@ export abstract class EngineBase {
 
   // ---- surface helpers ---------------------------------------------------------------------
 
+  /** Bootstrap and entry navigations: gated like any other action, recorded safe and approved. */
   protected async navigate(route: string, stepId: string): Promise<void> {
     const started = Date.now();
     const action = { kind: 'navigate' as const, url: { text: route } };
+    const gate = checkPolicy(this.policy, {
+      action,
+      observation: this.lastObservation ?? { title: '', frames: [], nodes: [], dialogs: [] },
+      phase: 'replay',
+      baseUrl: this.baseUrl,
+      values: {},
+      recorded: RECORDED_SAFE_APPROVED,
+    });
+    await this.event({
+      type: 'policy_check',
+      actor: 'automation',
+      stepId,
+      action,
+      verdict: gate.verdict,
+      liveRisk: gate.liveRisk,
+      mismatch: gate.mismatch,
+    });
+    await this.enforce(gate, { stepId, intent: `open ${route}`, action });
     const r = await this.deps.surface.act(action, {
       actor: 'automation',
       values: {},
@@ -613,7 +804,7 @@ export abstract class EngineBase {
       throw new Stop(
         {
           kind: 'failure',
-          failure: 'APP_ERROR',
+          failure: r.reason === 'NAVIGATION_BLOCKED' ? 'POLICY_BLOCKED' : 'APP_ERROR',
           expected: `navigation to ${route} to succeed`,
           observed: `${r.reason}: ${r.detail}`,
         },
@@ -622,8 +813,14 @@ export abstract class EngineBase {
     }
   }
 
+  /** A full observation with a screenshot, masked wherever a sensitive value shows (D-035). */
   protected async observe(label: string, stepId: string | undefined): Promise<SurfaceObservation> {
-    const obs = await this.deps.surface.observe({ screenshot: true });
+    const obs = await this.deps.surface.observe({
+      screenshot: true,
+      ...(this.sensitive.length > 0
+        ? { mask: (node: A11yNode) => shouldMask(node, this.sensitive) }
+        : {}),
+    });
     let screenshot: string | undefined;
     if (obs.screenshotPng) {
       const name = `steps/${String(++this.shots).padStart(3, '0')}-${stepId ?? 'run'}-${label}.png`;

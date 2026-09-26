@@ -189,6 +189,16 @@ export const RunEventSchema = z.discriminatedUnion('type', [
     recordedRisk: RiskSchema.optional(),
     mismatch: z.boolean(),
   }),
+  /** An operator's answer to a `confirm` verdict, or the absence of an operator (D-034). */
+  z.strictObject({
+    ...eventBase,
+    type: z.literal('confirmation'),
+    cause: EscalationCauseSchema,
+    rule: z.string().min(1),
+    reason: z.string().min(1),
+    answer: z.enum(['approved', 'denied', 'unattended']),
+    operatorId: z.string().min(1).optional(),
+  }),
   z.strictObject({
     ...eventBase,
     type: z.literal('action'),

@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "navigate",
+    "intent": "Try the administration area",
+    "url": { "text": "/admin/users" }
+  },
+  {
+    "kind": "navigate",
+    "intent": "Try an external site",
+    "url": { "text": "https://example.com/" }
+  },
+  {
+    "kind": "click",
+    "intent": "Follow the vendor support link in the footer",
+    "target": {
+      "strategies": [{ "kind": "role", "role": "link", "name": "Vendor support" }],
+      "framePath": ["main"]
+    }
+  },
+  {
+    "kind": "give_up",
+    "reason": "Nothing on the allowlist leads to the goal"
+  }
+]

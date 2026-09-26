@@ -1,0 +1,11 @@
+{
+  "status": "compiled",
+  "capability": {
+    "id": "open-sub-account",
+    "version": 2
+  },
+  "stepsRecorded": 7,
+  "evidence": {
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_181548_c156"
+  }
+}

@@ -5,6 +5,7 @@ import {
   type ActContext,
   type Action,
   type ActResult,
+  BLOCKED_NAVIGATION_TEXT,
   type DialogInfo,
   type FrameInfo,
   MissingParamError,
@@ -33,6 +34,11 @@ export interface PlaywrightSurfaceOptions {
   /** For example the x-handsoff-chaos header the mock app honours. */
   extraHTTPHeaders?: Record<string, string> | undefined;
   actionTimeoutMs?: number | undefined;
+  /**
+   * Network-level allowlist (01 §12, D-034): a navigation request to any other origin is answered
+   * with a 403 block page instead of leaving the process. Absent, nothing is intercepted.
+   */
+  allowedOrigins?: string[] | undefined;
 }
 
 class StaleRefError extends Error {
@@ -40,6 +46,43 @@ class StaleRefError extends Error {
 }
 
 const DIALOG_REFS = { dialog: 'dialog', ok: 'dialog-ok', cancel: 'dialog-cancel' } as const;
+
+const BLOCKED_HEADER = 'x-handsoff-blocked';
+const MASK_ATTRIBUTE = 'data-handsoff-mask';
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+/** The page served in place of a navigation outside the allowlist. Core's runtime detector reads the heading. */
+function blockedPage(url: URL): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${BLOCKED_NAVIGATION_TEXT}</title></head><body style="font-family:sans-serif;margin:2em"><h1>${BLOCKED_NAVIGATION_TEXT}</h1><p>HandsOff did not allow a navigation to <code>${escapeHtml(url.origin)}</code>: the origin is not in the policy allowlist.</p></body></html>`;
+}
+
+/** Paints opaque boxes over the given refs' elements; returns how many it painted. */
+function maskExpression(refs: string[]): string {
+  return `(function (refs) {
+  const lookup = window.__handsoff_refs || {};
+  let n = 0;
+  for (const ref of refs) {
+    const el = lookup[ref];
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    const d = document.createElement('div');
+    d.setAttribute(${JSON.stringify(MASK_ATTRIBUTE)}, '');
+    d.style.cssText = 'position:fixed;left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + r.height + 'px;background:#111;z-index:2147483647;pointer-events:none;';
+    document.body.appendChild(d);
+    n += 1;
+  }
+  return n;
+})(${JSON.stringify(refs)})`;
+}
+
+const UNMASK_EXPRESSION = `(function () {
+  const masks = document.querySelectorAll('[${MASK_ATTRIBUTE}]');
+  for (const m of Array.from(masks)) m.remove();
+  return masks.length;
+})()`;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -105,7 +148,9 @@ export async function createPlaywrightSurface(
     ...(options.extraHTTPHeaders ? { extraHTTPHeaders: options.extraHTTPHeaders } : {}),
   });
   const page = await context.newPage();
-  return new PlaywrightSurface(browser, context, page, options);
+  const surface = new PlaywrightSurface(browser, context, page, options);
+  if (options.allowedOrigins) await surface.blockOriginsOutside(options.allowedOrigins);
+  return surface;
 }
 
 /**
@@ -135,6 +180,32 @@ export class PlaywrightSurface implements Surface {
       for (const wake of this.dialogWaiters) wake();
       this.dialogWaiters.clear();
     });
+  }
+
+  /**
+   * Belt and braces under the policy gate: any navigation request (top document or frame, GET or
+   * form POST) to an origin outside the allowlist is answered here with a 403 block page, so even
+   * a bug in the gate cannot take the session off the allowlist. Sub-resources are left alone.
+   */
+  async blockOriginsOutside(allowedOrigins: string[]): Promise<void> {
+    const allowed = new Set(allowedOrigins.map((o) => new URL(o).origin));
+    await this.context.route(
+      (url) => !allowed.has(url.origin),
+      async (route) => {
+        const request = route.request();
+        if (!request.isNavigationRequest()) {
+          await route.continue();
+          return;
+        }
+        const url = new URL(request.url());
+        await route.fulfill({
+          status: 403,
+          contentType: 'text/html; charset=utf-8',
+          headers: { [BLOCKED_HEADER]: url.origin },
+          body: blockedPage(url),
+        });
+      },
+    );
   }
 
   /**
@@ -194,9 +265,36 @@ export class PlaywrightSurface implements Surface {
       dialogs: [],
     };
     if (options.screenshot ?? true) {
-      obs.screenshotPng = await this.page.screenshot({ type: 'png' });
+      const masked = options.mask ? nodes.filter(options.mask) : [];
+      obs.screenshotPng =
+        masked.length > 0
+          ? await this.screenshotMasked(masked)
+          : await this.page.screenshot({ type: 'png' });
     }
     return obs;
+  }
+
+  /**
+   * Screenshot with the given nodes painted over inside their own frames (D-035). The overlays are
+   * removed again whatever happens, so the next snapshot never sees them.
+   */
+  private async screenshotMasked(nodes: A11yNode[]): Promise<Uint8Array> {
+    const byFrame = new Map<Frame, string[]>();
+    for (const n of nodes) {
+      const frame = this.refFrames.get(n.ref);
+      if (!frame) continue;
+      byFrame.set(frame, [...(byFrame.get(frame) ?? []), n.ref]);
+    }
+    try {
+      for (const [frame, refs] of byFrame) {
+        await frame.evaluate(maskExpression(refs)).catch(() => undefined);
+      }
+      return await this.page.screenshot({ type: 'png' });
+    } finally {
+      for (const frame of byFrame.keys()) {
+        await frame.evaluate(UNMASK_EXPRESSION).catch(() => undefined);
+      }
+    }
   }
 
   /** Walks every frame with the in-page script and re-registers the refs it handed out. */
@@ -223,6 +321,7 @@ export class PlaywrightSurface implements Surface {
           framePath,
           path: n.path,
           ...(n.parentRef ? { parentRef: n.parentRef } : {}),
+          ...(n.formAction ? { formAction: n.formAction } : {}),
         });
         this.refFrames.set(n.ref, frame);
       }
@@ -269,7 +368,15 @@ export class PlaywrightSurface implements Surface {
           return { ok: true };
         case 'navigate': {
           const url = new URL(resolveValue(action.url, context.values), context.baseUrl).toString();
-          await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+          const response = await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+          const blocked = response?.headers()[BLOCKED_HEADER];
+          if (blocked) {
+            return {
+              ok: false,
+              reason: 'NAVIGATION_BLOCKED',
+              detail: `origin ${blocked} is outside the allowlist; the surface answered with the block page`,
+            };
+          }
           return { ok: true };
         }
         case 'wait':

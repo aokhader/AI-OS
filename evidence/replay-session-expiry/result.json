@@ -1,17 +1,17 @@
 {
   "status": "success",
   "outputs": {
-    "savingsBalance": 1250.75
+    "savingsBalance": "«savingsBalance#sha256:096175fe1de6»"
   },
   "capability": {
     "id": "get-member-savings-balance",
-    "version": 3
+    "version": 4
   },
   "stepsRun": [
     {
       "stepId": "s1",
       "attempts": 2,
-      "durationMs": 102,
+      "durationMs": 115,
       "drift": false,
       "resolvedBy": 0,
       "candidateCount": 1
@@ -19,7 +19,7 @@
     {
       "stepId": "s2",
       "attempts": 2,
-      "durationMs": 135,
+      "durationMs": 165,
       "drift": false,
       "resolvedBy": 0,
       "candidateCount": 1
@@ -27,7 +27,7 @@
     {
       "stepId": "s3",
       "attempts": 1,
-      "durationMs": 132,
+      "durationMs": 134,
       "drift": false,
       "resolvedBy": 0,
       "candidateCount": 1
@@ -35,7 +35,7 @@
     {
       "stepId": "s4",
       "attempts": 1,
-      "durationMs": 81,
+      "durationMs": 99,
       "drift": false,
       "resolvedBy": 0,
       "candidateCount": 1
@@ -50,12 +50,12 @@
       },
       "attempt": 1,
       "outcome": "recovered",
-      "at": "2026-09-25T10:04:20.587Z"
+      "at": "2026-09-26T01:19:12.109Z"
     }
   ],
   "sideEffects": "none",
   "evidence": {
-    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_030418_5ecd",
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_181910_5dfc",
     "lastObservation": "snapshots/s2-session-expired.json"
   }
 }

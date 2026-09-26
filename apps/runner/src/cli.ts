@@ -1,13 +1,16 @@
 import { Command } from 'commander';
+import { runApproveCommand } from './commands/approve.js';
 import { runDiscoverCommand } from './commands/discover.js';
+import { OPERATOR_MODES } from './commands/operator.js';
 import { PLANNER_PROVIDER_IDS } from './commands/planner.js';
 import { runReplayCommand } from './commands/replay.js';
 import { runServeCommand } from './commands/serve.js';
 
 /**
- * `handsoff` entry point: discover (P2), replay (P1) and serve (P3).
+ * `handsoff` entry point: discover (P2), replay (P1), serve (P3) and approve (P5).
  * See docs/context/04-roadmap.md.
  */
+const OPERATOR_HELP = `who answers a confirm verdict: ${OPERATOR_MODES.join(' | ')} (default HANDSOFF_OPERATOR, else tty in a terminal and none otherwise)`;
 const program = new Command();
 
 program
@@ -54,6 +57,7 @@ program
     '--scripted <file>',
     'follow a JSON script instead of calling a model (offline demo, tests)',
   )
+  .option('--operator <mode>', OPERATOR_HELP)
   .option('--data-dir <dir>', 'data directory (default HANDSOFF_DATA_DIR or ./data)')
   .action(
     async (opts: {
@@ -74,6 +78,7 @@ program
       model?: string;
       effort?: string;
       scripted?: string;
+      operator?: string;
       dataDir?: string;
     }) => {
       process.exitCode = await runDiscoverCommand(opts);
@@ -92,6 +97,7 @@ program
   )
   .option('--chaos <modes>', 'comma-separated chaos modes for the mock app')
   .option('--headless', 'run the browser headless (default HANDSOFF_HEADLESS)')
+  .option('--operator <mode>', OPERATOR_HELP)
   .option('--data-dir <dir>', 'data directory (default HANDSOFF_DATA_DIR or ./data)')
   .action(
     async (opts: {
@@ -101,11 +107,24 @@ program
       baseUrl?: string;
       chaos?: string;
       headless?: boolean;
+      operator?: string;
       dataDir?: string;
     }) => {
       process.exitCode = await runReplayCommand(opts);
     },
   );
+
+program
+  .command('approve')
+  .description(
+    'Mark a capability version approved so its risky steps with confirm none replay unattended',
+  )
+  .requiredOption('--capability <id>', 'capability id')
+  .option('--version <n>', 'capability version, default latest')
+  .option('--data-dir <dir>', 'data directory (default HANDSOFF_DATA_DIR or ./data)')
+  .action(async (opts: { capability: string; version?: string; dataDir?: string }) => {
+    process.exitCode = await runApproveCommand(opts);
+  });
 
 program
   .command('serve')

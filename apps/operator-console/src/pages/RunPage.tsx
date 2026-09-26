@@ -28,7 +28,9 @@ function describeEvent(e: RunEvent): string {
       return `${d.kind} · ${d.reason}`;
     }
     case 'policy_check':
-      return `${e.action.kind} → ${e.verdict.kind}${e.mismatch ? ' · risk mismatch' : ''}`;
+      return `${e.action.kind} → ${e.verdict.kind}${e.verdict.kind === 'allow' ? ` (${e.verdict.risk})` : ` · ${e.verdict.rule}`}${e.mismatch ? ' · risk mismatch' : ''}`;
+    case 'confirmation':
+      return `${e.cause} → ${e.answer}${e.operatorId ? ` · ${e.operatorId}` : ''}`;
     case 'action':
       return `${e.action.kind} · ${e.durationMs} ms${e.resolvedBy !== undefined ? ` · strategy ${e.resolvedBy + 1}${e.candidateCount !== undefined ? ` of ${e.candidateCount} candidate(s)` : ''}` : ''}`;
     case 'condition':

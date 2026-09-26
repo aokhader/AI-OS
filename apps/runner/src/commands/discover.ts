@@ -11,7 +11,9 @@ import {
   type Sensitivity,
 } from '@handsoff/core';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
+import { resolveOperator } from './operator.js';
 import { createPlannerFromEnv } from './planner.js';
+import { requirePolicy } from './policy.js';
 import { loadEnv, parseParams } from './replay.js';
 
 export interface DiscoverCommandOptions {
@@ -32,6 +34,7 @@ export interface DiscoverCommandOptions {
   model?: string | undefined;
   effort?: string | undefined;
   scripted?: string | undefined;
+  operator?: string | undefined;
   dataDir?: string | undefined;
 }
 
@@ -114,15 +117,31 @@ export async function runDiscoverCommand(opts: DiscoverCommandOptions): Promise<
     );
   }
 
+  const loaded = requirePolicy(env);
+  if (!loaded.ok) {
+    console.error(loaded.error);
+    return 2;
+  }
+  const { policy } = loaded;
+  const picked = resolveOperator(opts.operator, env, process.stdin.isTTY === true);
+  if (!picked.ok) {
+    console.error(picked.error);
+    return 2;
+  }
+  const { operator, mode } = picked.value;
+
   const baseUrl = opts.baseUrl ?? env.HANDSOFF_TARGET_URL ?? 'http://localhost:4100';
   const headless = opts.headless ?? env.HANDSOFF_HEADLESS === 'true';
   const capabilityId = opts.id ?? slug(opts.goal);
   console.error(
-    `handsoff discover → ${capabilityId} against ${baseUrl} (${headless ? 'headless' : 'headed'})`,
+    `handsoff discover → ${capabilityId} against ${baseUrl} (${headless ? 'headless' : 'headed'}) · operator ${mode}`,
   );
 
   const started = Date.now();
-  const surface = await createPlaywrightSurface({ headless });
+  const surface = await createPlaywrightSurface({
+    headless,
+    allowedOrigins: policy.allowedOrigins,
+  });
   let result: DiscoveryResult;
   try {
     result = await discover(
@@ -133,13 +152,22 @@ export async function runDiscoverCommand(opts: DiscoverCommandOptions): Promise<
         name: opts.name ?? opts.goal.slice(0, 80),
         entryRoute: opts.entry ?? '/',
         baseUrl,
+        policy,
         variantId: opts.variant,
         maxSteps: opts.maxSteps ? Number.parseInt(opts.maxSteps, 10) : intEnv('HANDSOFF_MAX_STEPS'),
         stepTimeoutMs: intEnv('HANDSOFF_STEP_TIMEOUT_MS'),
         runTimeoutMs: intEnv('HANDSOFF_RUN_TIMEOUT_MS'),
         outcomes: Object.entries(outcomes).map(([code, text]) => ({ code, text })),
       },
-      { surface, store, profile, planner, env, log: (line) => console.error(`  ${line}`) },
+      {
+        surface,
+        store,
+        profile,
+        planner,
+        env,
+        operator,
+        log: (line) => console.error(`  ${line}`),
+      },
     );
   } catch (err) {
     if (err instanceof EngineArgumentError) {

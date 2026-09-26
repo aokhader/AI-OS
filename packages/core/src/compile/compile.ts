@@ -9,8 +9,10 @@ import {
   type Capability,
   CapabilitySchema,
   type Condition,
+  type Confirm,
   type InputSpec,
   type OutputSpec,
+  type Risk,
   type Sensitivity,
   type Step,
   type SurfaceKind,
@@ -33,6 +35,9 @@ export interface DiscoveredStep {
   baseline?: Baseline | undefined;
   before: SurfaceObservation;
   after: SurfaceObservation;
+  /** The policy gate's verdict when the step ran (01 §7 step 6). Default safe. */
+  risk?: Risk | undefined;
+  confirm?: Confirm | undefined;
 }
 
 export interface DiscoveredOutput {
@@ -107,8 +112,8 @@ export function compileCapability(input: CompileInput): Capability {
       bindings,
       preconditions: [],
       postcondition: post.condition,
-      risk: 'safe',
-      confirm: 'none',
+      risk: d.risk ?? 'safe',
+      confirm: d.confirm ?? 'none',
       baseline: d.baseline ?? { resolvedBy: 0, candidateCount: 1 },
       recordedBy: 'automation',
     });
@@ -211,7 +216,10 @@ export function compileCapability(input: CompileInput): Capability {
     steps,
     success,
     detectors,
-    policy: { requiredScopes: [], riskySteps: [] },
+    policy: {
+      requiredScopes: [],
+      riskySteps: steps.filter((s) => s.risk === 'risky').map((s) => s.id),
+    },
   };
   return CapabilitySchema.parse(capability);
 }

@@ -24,6 +24,8 @@ export const A11yNodeSchema = z.strictObject({
   /** Structural path inside its frame, e.g. "form[1]/table[1]/tr[2]/td[2]/input[1]". Table sections are transparent. */
   path: z.string().min(1),
   parentRef: z.string().min(1).optional(),
+  /** Web surfaces: the resolved action URL of the form a control belongs to. The policy gate reads it. */
+  formAction: z.string().min(1).optional(),
 });
 export type A11yNode = z.infer<typeof A11yNodeSchema>;
 

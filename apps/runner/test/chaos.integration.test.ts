@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createFsStore, type ReplayResult, replay } from '@handsoff/core';
+import { type Capability, createFsStore, type ReplayResult, replay } from '@handsoff/core';
 import { createApp, variants } from '@handsoff/legacy-bank';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -52,10 +52,11 @@ describe('replay under injected conditions', () => {
   async function runWith(
     chaos: string,
     params: Record<string, string> = { memberId: '10001' },
-    capabilityId = 'get-member-savings-balance',
+    capabilityId: string | Capability = 'get-member-savings-balance',
   ): Promise<ReplayResult> {
     const store = createFsStore(dataDir);
-    const capability = await store.capabilities.get(capabilityId);
+    const capability =
+      typeof capabilityId === 'string' ? await store.capabilities.get(capabilityId) : capabilityId;
     const profile = await store.appProfiles.get('acme-coreteller');
     if (!capability || !profile) throw new Error('fixtures missing');
     const surface = await createPlaywrightSurface({
@@ -153,11 +154,27 @@ describe('replay under injected conditions', () => {
 
   const subAccount = { memberId: '10001', accountType: 'Checking', deposit: '40.00' };
 
+  /**
+   * The write flow as a reviewer leaves it: approved, its submit risky with confirm none, so it
+   * replays unattended. The confirmation paths are covered by policy.integration.test.ts.
+   */
+  async function approvedSubAccount(): Promise<Capability> {
+    const c = await createFsStore(dataDir).capabilities.get('open-sub-account');
+    if (!c) throw new Error('open-sub-account missing');
+    return {
+      ...c,
+      status: 'approved',
+      steps: c.steps.map((s) => (s.id === 's7' ? { ...s, risk: 'risky', confirm: 'none' } : s)),
+      policy: { ...c.policy, riskySteps: ['s7'] },
+    };
+  }
+
   it('open-sub-account: the discovered write flow replays to a confirmation number', async () => {
-    const result = await runWith('not-armed', subAccount, 'open-sub-account');
+    const result = await runWith('not-armed', subAccount, await approvedSubAccount());
     expect(result.status, JSON.stringify(result, null, 2)).toBe('success');
     if (result.status !== 'success') return;
     expect(result.outputs.confirmationNumber).toMatch(/^C-\d{6}$/);
+    expect(result.sideEffects).toBe('committed');
     expect(result.stepsRun.map((s) => s.stepId)).toEqual([
       's1',
       's2',
@@ -171,12 +188,14 @@ describe('replay under injected conditions', () => {
   }, 120_000);
 
   it('validation: a rejected submit is a business outcome at the submit step', async () => {
-    const result = await runWith('validation', subAccount, 'open-sub-account');
+    const result = await runWith('validation', subAccount, await approvedSubAccount());
     expect(result.status, JSON.stringify(result, null, 2)).toBe('outcome');
     if (result.status !== 'outcome') return;
     expect(result.code).toBe('VALIDATION_REJECTED');
     expect(result.atStep).toBe('s7');
     expect(result.recoveries).toEqual([]);
+    // the risky submit ran and its checkpoint was never confirmed: the engine cannot prove nothing committed
+    expect(result.sideEffects).toBe('possible');
     await stat(path.join(result.evidence.runDir, result.evidence.lastObservation ?? ''));
   }, 120_000);
 });

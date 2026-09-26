@@ -3,11 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  A11yNodeSchema,
   AppProfileSchema,
   CapabilitySchema,
   ConditionSchema,
   PolicySchema,
   ReplayResultSchema,
+  RunEventSchema,
   TargetSpecSchema,
 } from './index.js';
 
@@ -273,6 +275,82 @@ describe('ReplayResultSchema', () => {
       outputs: {},
       ...common,
       escalation: { id: 'esc_1', humanActions: [], resolution: 'completed_by_human' },
+    });
+    expect(r.success, issues(r)).toBe(true);
+  });
+});
+
+describe('RunEventSchema', () => {
+  const base = { at: '2026-09-25T10:00:00.000Z', runId: 'run_20260925_100000_0000', stepId: 's7' };
+
+  it('accepts an operator confirmation and the unattended case (D-034)', () => {
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        type: 'confirmation',
+        actor: 'human',
+        cause: 'CONFIRM_REQUIRED',
+        rule: 'riskyPatterns.buttonText[6]',
+        reason: 'the button "Open Account" matches the risky pattern /open account/i',
+        answer: 'approved',
+        operatorId: 'terminal',
+      }).success,
+    ).toBe(true);
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        type: 'confirmation',
+        actor: 'automation',
+        cause: 'CONFIRM_REQUIRED',
+        rule: 'riskyPatterns.buttonText[6]',
+        reason: 'no operator attached',
+        answer: 'unattended',
+      }).success,
+    ).toBe(true);
+    expect(
+      RunEventSchema.safeParse({
+        ...base,
+        type: 'confirmation',
+        actor: 'human',
+        cause: 'NOT_A_CAUSE',
+        rule: 'r',
+        reason: 'x',
+        answer: 'approved',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('records a policy check with any verdict kind', () => {
+    const common = {
+      ...base,
+      type: 'policy_check',
+      actor: 'automation',
+      action: { kind: 'click', target: { ref: 'e1' } },
+      liveRisk: 'risky',
+      recordedRisk: 'safe',
+      mismatch: true,
+    };
+    for (const verdict of [
+      { kind: 'allow', risk: 'risky' },
+      { kind: 'block', rule: 'allowedOrigins', reason: 'off the allowlist' },
+      { kind: 'confirm', rule: 'riskyPatterns.buttonText[6]', reason: 'risky' },
+    ]) {
+      expect(RunEventSchema.safeParse({ ...common, verdict }).success, verdict.kind).toBe(true);
+    }
+  });
+});
+
+describe('A11yNodeSchema', () => {
+  it('accepts a form control with its resolved form action', () => {
+    const r = A11yNodeSchema.safeParse({
+      ref: 'e9',
+      role: 'button',
+      name: 'Open Account',
+      states: [],
+      bbox: { x: 1, y: 2, w: 3, h: 4 },
+      framePath: ['main'],
+      path: 'form[1]/table[1]/tr[3]/td[2]/input[1]',
+      formAction: 'http://localhost:4100/members/10001/accounts/open',
     });
     expect(r.success, issues(r)).toBe(true);
   });
