@@ -1,14 +1,16 @@
 # 03 · UI Context (Operator Console)
 
-Status: draft · Last updated: 2026-09-26
+Status: stable · Last updated: 2026-09-26
 
-Skeleton. The heading structure is final; each section says what belongs there and carries a `TODO` until it is written. The console is web-only ([D-005](08-decision-log.md#d-005--web-only-operator-console-vite--react-no-mobile)) and is context plus controls; the headed browser window is where the operator actually works ([D-012](08-decision-log.md#d-012--handoff-via-the-headed-browser-with-captured-human-actions-no-screencast)).
+The console is web-only ([D-005](08-decision-log.md#d-005--web-only-operator-console-vite--react-no-mobile)) and is context plus controls; the headed browser window is where the operator actually works ([D-012](08-decision-log.md#d-012--handoff-via-the-headed-browser-with-captured-human-actions-no-screencast)).
 
 ## 1. Purpose and personas
 
-What the console is for (make escalations actionable, make runs and capabilities reviewable) and who uses it: operator, reviewer, developer. One paragraph per persona with their top task.
+The console makes escalations actionable and runs and capabilities reviewable. It never drives the browser.
 
-TODO
+- **Operator.** Sees an open escalation, reads why automation stopped and what the page looked like, claims it, works in the headed browser window, and hands back with one of the suggested actions. Top task: get a paused run to a correct end without guessing what automation was about to do.
+- **Reviewer.** Opens a capability, reads its inputs, outputs, steps, every locator strategy in resolution order, its conditions and its risky steps, and decides whether it may run unattended (`handsoff approve`). Top task: understand what the capability does and what it can commit before approving it.
+- **Developer.** Reads a run's timeline, event by event, with the screenshot at each observation, to see why a step failed, which strategy resolved a target, what the model decided and what the gate said. Top task: debug a run from its evidence alone.
 
 ## 2. Information architecture
 
@@ -21,7 +23,7 @@ Routes and what each shows:
 | `/escalations` | Inbox | open first; cause, capability, step, age, claim button |
 | `/escalations/:id` | Escalation detail | intervention context, latest screenshot, claim / hand-back controls, human actions so far |
 | `/capabilities` | Capabilities | id, name, latest version, status, last replay result |
-| `/capabilities/:id` | Capability detail | inputs, outputs, steps with targets and risk, detectors, versions, approve toggle, replay form |
+| `/capabilities/:id` | Capability detail | inputs, outputs, steps with targets and risk, detectors, versions (approval is the CLI's `handsoff approve`; there is no replay form, replay is the agent's call through the CLI) |
 
 Built in P3: `/runs`, `/runs/:id`, `/capabilities`, `/capabilities/:id` and `/capabilities/:id/v/:version` over the read API in `apps/runner/src/server/api.ts` (`/api/runs`, `/api/runs/:id`, `/api/run-files/:id/*`, `/api/capabilities`, `/api/capabilities/:id[/v/:version]`). The wire types are `RunListItem`, `RunDetail`, `CapabilityListItem` and `CapabilityDetail` in core, the only thing the console imports from the workspace. Run detail groups the event log by step and shows each observation's screenshot inline; capability detail lists every locator strategy of every step in resolution order.
 
@@ -39,15 +41,11 @@ The runner pushes `ConsoleMessage`s over `/ws`: `escalation` (raised, claimed or
 
 ## 5. Visual language
 
-Minimal tokens: neutral background, one accent, and four status colours for `success`, `outcome`, `failure`, `escalated`/awaiting. Monospace for ids, codes and paths. Tables over cards for lists. Screenshots shown at natural size with a masked-region indicator.
-
-TODO
+Minimal tokens: a neutral background, one accent (sky) for links and the open-escalation count, and status tones from one map in `components/ui.tsx`: green for `success` and `compiled`, amber for `outcome`, rose for `failure`, `aborted`, `gave_up` and `limit`, sky for `awaiting_operator`, `human` and `escalated`, grey for `running`. Every badge carries its text as well as its colour. Monospace for ids, codes, paths and raw JSON. Tables for lists, definition lists for one record. Screenshots are shown as taken, masked regions included (they are painted over before capture, so what the console shows is what was persisted), at thumbnail size in timelines and full width on the escalation screen, each linking to the file.
 
 ## 6. Accessibility and keyboard
 
-Every control reachable by keyboard; claim and hand-back are buttons with explicit labels; status conveyed by text as well as colour; screenshots have alt text stating step and time.
-
-TODO
+Every control is a native button, link or input, so it is reachable and operable by keyboard. Claim and each hand-back are buttons with explicit labels and a one-line explanation of what they do; the operator id field is labelled. Status is conveyed by text as well as colour. Screenshots have alt text naming the step and the time. The open-escalation count in the navigation carries visually hidden text. No keyboard shortcuts, no drag interactions.
 
 ## 7. Out of scope
 

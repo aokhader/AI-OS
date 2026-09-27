@@ -773,6 +773,17 @@
                   "minLength": 1
                 }
               },
+              "frames": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
               "detectors": {
                 "type": "array",
                 "items": {

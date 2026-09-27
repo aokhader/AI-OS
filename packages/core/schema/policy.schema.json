@@ -91,6 +91,22 @@
       "exclusiveMinimum": 0,
       "maximum": 9007199254740991
     },
+    "escalateOn": {
+      "type": "object",
+      "properties": {
+        "replayFailure": {
+          "type": "boolean"
+        },
+        "recoveryExhausted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "replayFailure",
+        "recoveryExhausted"
+      ],
+      "additionalProperties": false
+    },
     "budgets": {
       "type": "object",
       "properties": {
@@ -138,6 +154,7 @@
     "riskyPatterns",
     "riskyMode",
     "escalationTimeoutMs",
+    "escalateOn",
     "budgets",
     "assistedFallback"
   ],

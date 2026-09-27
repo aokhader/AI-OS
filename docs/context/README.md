@@ -1,6 +1,6 @@
 # HandsOff — Project Context
 
-Status: stable · Last updated: 2026-09-21
+Status: stable · Last updated: 2026-09-26
 
 This folder is the shared source of truth for the HandsOff build. Read it at the start of every working session, human or AI, before touching code. The assessment brief it answers lives at [../description.md](../description.md); the original PDF sits alongside it.
 
@@ -14,11 +14,11 @@ This folder is the shared source of truth for the HandsOff build. Read it at the
 | 2 | [01-architecture.md](01-architecture.md) | Always. Components, seams, engines, contracts. The load-bearing doc. | full |
 | 3 | [02-tech-stack-and-data-model.md](02-tech-stack-and-data-model.md) | Before writing code or schemas. | full |
 | 4 | [08-decision-log.md](08-decision-log.md) | Before proposing a change to anything in 01 or 02. | full |
-| 5 | [05-progress-tracker.md](05-progress-tracker.md) | Start and end of every session. | skeleton |
-| 6 | [04-roadmap.md](04-roadmap.md) | When planning a session's work. | skeleton |
-| 7 | [06-ai-workflow-rules.md](06-ai-workflow-rules.md) | Once, then whenever unsure how to proceed. | skeleton |
-| 8 | [07-code-standards.md](07-code-standards.md) | Before writing code. | skeleton |
-| 9 | [03-ui-context.md](03-ui-context.md) | Before touching the operator console. | skeleton |
+| 5 | [05-progress-tracker.md](05-progress-tracker.md) | Start and end of every session. | full |
+| 6 | [04-roadmap.md](04-roadmap.md) | When planning a session's work. | full |
+| 7 | [06-ai-workflow-rules.md](06-ai-workflow-rules.md) | Once, then whenever unsure how to proceed. | full |
+| 8 | [07-code-standards.md](07-code-standards.md) | Before writing code. | full |
+| 9 | [03-ui-context.md](03-ui-context.md) | Before touching the operator console. | full |
 
 ## Precedence when documents disagree
 
@@ -36,11 +36,9 @@ If code disagrees with the docs, the docs are wrong or the code is wrong. Decide
 - The brief is cited by section number, for example "brief §3.3".
 - Schemas are TypeScript in fenced blocks. Diagrams are Mermaid.
 - Non-obvious choices carry a one-line "why" and, where relevant, "at real scale".
-- Skeleton docs keep their full heading structure with `TODO` markers under each heading.
 
 ## How to update
 
 - Small correction: edit in place and bump `Last updated`.
 - Anything that contradicts 01 or 02: add an entry to [08-decision-log.md](08-decision-log.md) first, mark the superseded decision, then edit the docs.
-- Turning a skeleton into a full doc: replace every `TODO`, then change its status in the table above.
 - Never change files under `/evidence/` to match the docs. Evidence is immutable; fix the docs instead.
