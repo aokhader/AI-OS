@@ -1,13 +1,16 @@
 import { Navigate, NavLink, Route, Routes } from 'react-router';
-import { Empty, PageTitle } from './components/ui';
+import { useEscalations, useLiveUpdates } from './api';
+import { Empty } from './components/ui';
 import { CapabilitiesPage } from './pages/CapabilitiesPage';
 import { CapabilityPage } from './pages/CapabilityPage';
+import { EscalationPage } from './pages/EscalationPage';
+import { EscalationsPage } from './pages/EscalationsPage';
 import { RunPage } from './pages/RunPage';
 import { RunsPage } from './pages/RunsPage';
 
 /**
  * Operator console: context plus controls; the headed browser is where an operator works
- * (docs/context/03-ui-context.md). P3 ships runs and capabilities; escalations follow in P6.
+ * (docs/context/03-ui-context.md). Runs and capabilities since P3, escalations since P6.
  */
 const NAV = [
   { to: '/runs', label: 'Runs' },
@@ -15,16 +18,20 @@ const NAV = [
   { to: '/escalations', label: 'Escalations' },
 ];
 
-function EscalationsPage() {
+function OpenCount() {
+  const q = useEscalations();
+  const open = q.data?.filter((i) => i.open).length ?? 0;
+  if (open === 0) return null;
   return (
-    <>
-      <PageTitle>Escalations</PageTitle>
-      <Empty>The inbox, claim and hand-back controls arrive in phase P6.</Empty>
-    </>
+    <span className="ml-1 rounded-full bg-sky-600 px-1.5 text-[11px] font-semibold text-white">
+      {open}
+      <span className="sr-only"> open escalation(s)</span>
+    </span>
   );
 }
 
 export function App() {
+  useLiveUpdates();
   return (
     <div className="min-h-screen">
       <header className="border-b border-neutral-200 bg-white">
@@ -42,6 +49,7 @@ export function App() {
                 }
               >
                 {item.label}
+                {item.to === '/escalations' ? <OpenCount /> : null}
               </NavLink>
             ))}
           </nav>
@@ -56,6 +64,7 @@ export function App() {
           <Route path="/capabilities/:id" element={<CapabilityPage />} />
           <Route path="/capabilities/:id/v/:version" element={<CapabilityPage />} />
           <Route path="/escalations" element={<EscalationsPage />} />
+          <Route path="/escalations/:id" element={<EscalationPage />} />
           <Route path="*" element={<Empty>Nothing here.</Empty>} />
         </Routes>
       </main>

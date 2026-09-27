@@ -3,14 +3,21 @@ import { describePredicate, evaluatePredicate } from '../conditions/predicate.js
 import { digestOf } from '../digest.js';
 import {
   checkPolicy,
+  classifyRisk,
   type GateResult,
   type Phase,
   permissivePolicy,
   RECORDED_SAFE_APPROVED,
 } from '../policy/gate.js';
-import type { ConfirmRequest, Operator } from '../ports/operator.js';
+import type { EscalationControls, Operator } from '../ports/operator.js';
 import type { RunHandle, Store } from '../ports/store.js';
-import type { ParamValues, Surface, SurfaceObservation } from '../ports/surface.js';
+import type {
+  ActResult,
+  HumanAction,
+  ParamValues,
+  Surface,
+  SurfaceObservation,
+} from '../ports/surface.js';
 import { redactJson, redactText, type SensitiveValue, shouldMask } from '../redact.js';
 import { describeTarget, resolveTarget } from '../resolve/resolve-target.js';
 import {
@@ -18,10 +25,18 @@ import {
   type Action,
   type AppProfile,
   actionTarget,
+  type Baseline,
   type BootstrapStep,
+  type CapabilityRef,
   type Condition,
+  type ControlOwner,
+  type Escalation,
+  type EscalationBlock,
+  type EscalationCause,
   type FailureKind,
+  type HandBackKind,
   type Policy,
+  type RecordedStep,
   type Recovery,
   type RecoveryRoutine,
   type Risk,
@@ -29,7 +44,10 @@ import {
   type SideEffects,
   type Step,
   type StepReport,
+  type TargetSpec,
 } from '../schema/index.js';
+import { automationMayAct, type ControlEvent, transition } from './control.js';
+import { humanStep, nodeForHuman } from './human.js';
 import { withRef } from './values.js';
 
 /** Bad arguments are reported before any run folder exists. */
@@ -87,6 +105,8 @@ export class Stop extends Error {
   constructor(
     readonly reason: StopReason,
     readonly atStep: string | undefined,
+    /** Set when the stop is one policy may turn into an escalation (D-036). */
+    readonly escalationCause?: EscalationCause,
   ) {
     super(
       reason.kind === 'failure'
@@ -111,6 +131,55 @@ export class RebootstrapSignal extends Error {
     super(`rebootstrap: ${condition.id} at ${stepId}`);
   }
 }
+
+/**
+ * An operator handed the session back with `resume` or `mark_complete` (D-036). Raised from
+ * wherever the escalation happened and handled by the engine's outer loop: replay runs the
+ * checkpoint scan or re-extracts outputs, discovery compiles what was recorded.
+ */
+export class HandBackSignal extends Error {
+  override readonly name = 'HandBackSignal';
+  constructor(
+    readonly kind: 'resume' | 'mark_complete',
+    readonly stepId: string,
+    readonly escalation: Escalation,
+  ) {
+    super(`hand back: ${kind} at ${stepId}`);
+  }
+}
+
+export interface EscalateInput {
+  cause: EscalationCause;
+  detail: string;
+  stepId: string;
+  stepIntent?: string | undefined;
+  suggestedActions: HandBackKind[];
+}
+
+/** How an escalation ended: the operator's decision, or nobody came. */
+export type HandBackOutcome =
+  | { kind: HandBackKind; operatorId: string; humanActions: number }
+  | { kind: 'abandoned'; humanActions: number };
+
+/** A human step with the observations around it, for engines that record it (discovery). */
+export interface HumanStepRecord {
+  step: RecordedStep;
+  target: TargetSpec;
+  baseline: Baseline;
+  before: SurfaceObservation;
+  after: SurfaceObservation;
+}
+
+const RESOLUTIONS: Record<
+  HandBackKind | 'abandoned',
+  NonNullable<Escalation['resolution']>['kind']
+> = {
+  approve_step: 'approved',
+  resume: 'resumed',
+  mark_complete: 'completed_by_human',
+  abort: 'aborted',
+  abandoned: 'abandoned',
+};
 
 export interface WaitResult {
   matched: boolean;
@@ -169,9 +238,20 @@ export abstract class EngineBase {
   protected readonly rawOutputs = new Map<string, string>();
   /** Values that must never be persisted in clear text. */
   protected sensitive: SensitiveValue[] = [];
+  /** Every parameter value, for anchor derivation of human steps. */
+  protected allValues: string[] = [];
   private readonly recoveryCounts = new Map<string, number>();
   private readonly attempts = new Map<string, number>();
   protected rebootstraps = 0;
+  // ---- control transfer (01 §11) ----
+  protected controlOwner: ControlOwner = 'automation';
+  protected readonly humanActions: RecordedStep[] = [];
+  protected lastEscalation: Escalation | undefined;
+  private escalationCount = 0;
+  private humanCount = 0;
+  private humanChain: Promise<void> = Promise.resolve();
+  /** The observation the previous human action was judged against, and when its after-observation started. */
+  private humanBurst: { before: SurfaceObservation; afterStartedAt: string } | undefined;
 
   protected constructor(
     protected readonly deps: EngineDeps,
@@ -212,7 +292,7 @@ export abstract class EngineBase {
     const ok = await this.waitFor(b.success, this.stepTimeoutMs, 'bootstrap', detectors);
     if (ok.verdict) {
       await this.snapshot('bootstrap', ok.obs);
-      this.raise(ok.verdict, 'bootstrap');
+      await this.raise(ok.verdict, 'bootstrap');
     }
     if (!ok.matched) {
       throw new Stop(
@@ -290,7 +370,7 @@ export abstract class EngineBase {
       const w = await this.waitFor(pre, pre.when.timeoutMs ?? 2_000, stepId, detectors);
       if (w.verdict) {
         await this.snapshot(stepId, w.obs);
-        this.raise(w.verdict, stepId);
+        await this.raise(w.verdict, stepId);
       }
       if (!w.matched) {
         await this.snapshot(stepId, w.obs);
@@ -405,11 +485,7 @@ export abstract class EngineBase {
     });
 
     if (step.action.kind !== 'extract') {
-      const r = await this.deps.surface.act(action, {
-        actor: 'automation',
-        values,
-        baseUrl: this.baseUrl,
-      });
+      const r = await this.act(action, values);
       if (risk === 'risky') this.riskyExecuted = true;
       if (!r.ok) {
         await this.snapshot(stepId, before);
@@ -447,7 +523,7 @@ export abstract class EngineBase {
     );
     if (post.verdict) {
       await this.snapshot(stepId, post.obs);
-      this.raise(post.verdict, stepId);
+      await this.raise(post.verdict, stepId);
     }
     const after = await this.settled('after', stepId, detectors, {
       condition: step.postcondition,
@@ -500,12 +576,16 @@ export abstract class EngineBase {
         throw this.exhausted(c, stepId);
       }
       await this.snapshot(stepId, obs);
-      this.raise(c, stepId);
+      await this.raise(c, stepId);
     }
   }
 
-  /** Turns a terminal classification into a Stop. Escalation arrives in P6. */
-  protected raise(c: Classification, stepId: string): void {
+  /**
+   * Turns a terminal classification into a Stop, or, for an escalate-class condition, into an
+   * escalation whose hand-back decides: resume and mark_complete raise the signal for the outer
+   * loop, abort and abandonment stop the run.
+   */
+  protected async raise(c: Classification, stepId: string): Promise<void> {
     switch (c.kind) {
       case 'proceed':
         return;
@@ -526,16 +606,299 @@ export abstract class EngineBase {
           },
           stepId,
         );
-      case 'escalate':
+      case 'escalate': {
+        const detail = `condition ${c.condition.id} matched${c.condition.message ? `: ${c.condition.message}` : ''}`;
+        const hb = await this.escalate({
+          cause: 'CONDITION_ESCALATE',
+          detail,
+          stepId,
+          suggestedActions: ['resume', 'mark_complete', 'abort'],
+        });
+        if (hb.kind === 'resume' || hb.kind === 'mark_complete') {
+          throw new HandBackSignal(hb.kind, stepId, this.lastEscalation as Escalation);
+        }
         throw new Stop(
           {
             kind: 'failure',
-            failure: 'UNEXPECTED_STATE',
-            expected: 'no escalation condition',
-            observed: `condition ${c.condition.id} matched and requires an operator (escalation arrives in P6)`,
+            failure: hb.kind === 'abandoned' ? 'ESCALATION_ABANDONED' : 'UNEXPECTED_STATE',
+            expected: `an operator to resolve ${c.condition.id} at ${stepId}`,
+            observed:
+              hb.kind === 'abandoned'
+                ? `${detail}; nobody claimed the escalation`
+                : `${detail}; operator ${hb.operatorId} aborted`,
           },
           stepId,
         );
+      }
+    }
+  }
+
+  // ---- control transfer and escalation (01 §11, D-036) --------------------------------------
+
+  /** The only way the engines touch the surface's act: refused unless automation owns the session. */
+  protected async act(action: Action, values: ParamValues): Promise<ActResult> {
+    if (!automationMayAct(this.controlOwner)) {
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'UNEXPECTED_STATE',
+          expected: 'automation to own the session before acting',
+          observed: `control owner is ${this.controlOwner}`,
+        },
+        this.currentStep,
+      );
+    }
+    return this.deps.surface.act(action, { actor: 'automation', values, baseUrl: this.baseUrl });
+  }
+
+  /** What the escalation record says the run is doing: the capability or the goal. */
+  protected abstract escalationSubject(): { capability?: CapabilityRef; goal?: string };
+
+  /** Engines that record steps (discovery) keep the human's steps too. */
+  protected onHumanStep(_record: HumanStepRecord): void {}
+
+  /**
+   * Writes the intervention request, moves the owner to awaiting_operator and waits for the
+   * operator's hand-back through the controls, or for the abandonment timeout while nobody has
+   * claimed. With no operator attached the escalation is abandoned at once.
+   */
+  protected async escalate(input: EscalateInput): Promise<HandBackOutcome> {
+    const { cause, detail, stepId } = input;
+    const obs = await this.observe('escalation', stepId);
+    const id = `${this.run.id}-e${++this.escalationCount}`;
+    await this.snapshot(stepId, obs, `${id.slice(this.run.id.length + 1)}-${stepId}`);
+    const record: Escalation = {
+      id,
+      runId: this.run.id,
+      phase: this.phase,
+      ...this.escalationSubject(),
+      cause,
+      detail,
+      atStep: stepId,
+      ...(input.stepIntent ? { stepIntent: input.stepIntent } : {}),
+      screenshot: this.lastScreenshot ?? 'none',
+      snapshotDigest: digestOf(obs),
+      suggestedActions: input.suggestedActions,
+      requestedAt: this.now().toISOString(),
+    };
+    this.lastEscalation = record;
+    await this.persistEscalation(record);
+    await this.transfer({ type: 'escalate' }, { cause, escalationId: id, stepId });
+    this.log(`escalation ${id}: ${cause} at ${stepId} (${detail})`);
+
+    const operator = this.deps.operator;
+    const mine: RecordedStep[] = [];
+    if (!operator) {
+      await this.resolveEscalation(record, 'abandoned', undefined, stepId, mine.length);
+      return { kind: 'abandoned', humanActions: 0 };
+    }
+
+    let settle: (outcome: HandBackOutcome) => void = () => undefined;
+    const done = new Promise<HandBackOutcome>((resolve) => {
+      settle = resolve;
+    });
+    let claimedBy: string | undefined;
+    let resolved = false;
+    let detach: (() => void) | undefined;
+    const listeners = new Set<(step: RecordedStep) => void>();
+    const finish = async (outcome: HandBackOutcome, by: string | undefined) => {
+      resolved = true;
+      clearTimeout(timer);
+      detach?.();
+      await this.humanChain;
+      await this.resolveEscalation(record, outcome.kind, by, stepId, mine.length);
+      settle(outcome);
+    };
+    const timer = setTimeout(() => {
+      if (!claimedBy && !resolved) {
+        this.log(`escalation ${id}: nobody claimed within ${this.policy.escalationTimeoutMs} ms`);
+        void finish({ kind: 'abandoned', humanActions: 0 }, undefined);
+      }
+    }, this.policy.escalationTimeoutMs);
+    const claim = async (operatorId: string) => {
+      if (resolved) throw new Error(`escalation ${id} is already resolved`);
+      if (claimedBy === operatorId) return;
+      if (claimedBy) throw new Error(`escalation ${id} is claimed by ${claimedBy}`);
+      claimedBy = operatorId;
+      clearTimeout(timer);
+      record.claimedBy = operatorId;
+      record.claimedAt = this.now().toISOString();
+      await this.transfer({ type: 'claim' }, { operatorId, escalationId: id, stepId });
+      await this.persistEscalation(record);
+      detach = await this.deps.surface.captureHumanActions((action) => {
+        this.humanChain = this.humanChain
+          .then(async () => {
+            const step = await this.recordHuman(action, stepId);
+            mine.push(step);
+            for (const l of listeners) l(step);
+          })
+          .catch((err: unknown) => {
+            this.log(
+              `human action not recorded: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+      });
+      this.log(`escalation ${id}: claimed by ${operatorId}; recording their actions`);
+    };
+    const controls: EscalationControls = {
+      claim,
+      handBack: async (kind, operatorId) => {
+        if (resolved) throw new Error(`escalation ${id} is already resolved`);
+        if (!claimedBy && kind !== 'abort') await claim(operatorId);
+        await finish({ kind, operatorId, humanActions: mine.length }, operatorId);
+      },
+      current: () => record,
+      humanActions: () => [...mine],
+      onHumanAction: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      settled: done.then(() => record),
+    };
+    try {
+      await operator.escalate(record, controls);
+    } catch (err) {
+      this.log(`operator failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (!resolved) await finish({ kind: 'abandoned', humanActions: mine.length }, undefined);
+    }
+    const outcome = await done;
+    if (outcome.kind !== 'abandoned') this.lastObservation = await this.observe('handback', stepId);
+    return outcome;
+  }
+
+  private async resolveEscalation(
+    record: Escalation,
+    kind: HandBackKind | 'abandoned',
+    by: string | undefined,
+    stepId: string,
+    humanActions: number,
+  ): Promise<void> {
+    record.resolution = {
+      kind: RESOLUTIONS[kind],
+      at: this.now().toISOString(),
+      ...(by ? { by } : {}),
+      humanActions,
+    };
+    const event: ControlEvent =
+      kind === 'abandoned'
+        ? { type: 'abandon' }
+        : { type: 'hand_back', to: kind === 'abort' ? 'aborted' : 'automation' };
+    await this.transfer(event, {
+      ...(by ? { operatorId: by } : {}),
+      escalationId: record.id,
+      handBack: kind,
+      stepId,
+    });
+    await this.persistEscalation(record);
+    this.log(`escalation ${record.id}: ${record.resolution.kind}${by ? ` by ${by}` : ''}`);
+  }
+
+  private async persistEscalation(record: Escalation): Promise<void> {
+    const redacted = redactJson(record, this.sensitive);
+    await this.deps.store.escalations.put(redacted);
+    await this.run.putJson('escalation.json', redacted);
+  }
+
+  /** One transition of the control-owner machine, recorded and mirrored into run.json. */
+  private async transfer(
+    event: ControlEvent,
+    extra: {
+      stepId: string;
+      operatorId?: string | undefined;
+      cause?: EscalationCause | undefined;
+      escalationId?: string | undefined;
+      handBack?: HandBackKind | 'abandoned' | undefined;
+    },
+  ): Promise<void> {
+    const from = this.controlOwner;
+    const to = transition(from, event);
+    this.controlOwner = to;
+    await this.event({
+      type: 'control_transfer',
+      actor: event.type === 'claim' || event.type === 'hand_back' ? 'human' : 'automation',
+      stepId: extra.stepId,
+      from,
+      to,
+      ...(extra.operatorId ? { operatorId: extra.operatorId } : {}),
+      ...(extra.cause ? { cause: extra.cause } : {}),
+      ...(extra.escalationId ? { escalationId: extra.escalationId } : {}),
+      ...(extra.handBack ? { handBack: extra.handBack } : {}),
+    });
+    await this.run.update({ controlOwner: to });
+  }
+
+  /**
+   * A person's action becomes a first-class step: the target is derived from the observation they
+   * acted on, the page is observed again once it settles, and the step is logged as human.
+   */
+  private async recordHuman(action: HumanAction, stepId: string): Promise<RecordedStep> {
+    // Events can arrive faster than observations: a click right after a change belongs to the same
+    // page as the change, so an action older than the previous after-observation reuses its before.
+    const burst = this.humanBurst;
+    const inBurst = burst !== undefined && action.at <= burst.afterStartedAt;
+    const before = inBurst
+      ? burst.before
+      : (this.lastObservation ?? (await this.deps.surface.observe({ screenshot: false })));
+    const node = nodeForHuman(action, before);
+    const risk: Risk =
+      node && action.kind === 'click'
+        ? classifyRisk(this.policy, {
+            action: { kind: 'click', target: { ref: node.ref } },
+            node,
+            observation: before,
+            phase: this.phase,
+            baseUrl: this.baseUrl,
+            values: {},
+          })
+          ? 'risky'
+          : 'safe'
+        : 'safe';
+    if (!inBurst) await this.settleAfter(before);
+    const afterStartedAt = this.now().toISOString();
+    const after = await this.observe('human', stepId);
+    this.humanBurst = { before, afterStartedAt };
+    const { step, target, baseline } = humanStep({
+      id: `h${++this.humanCount}`,
+      action,
+      before,
+      after,
+      paramValues: this.allValues,
+      risk,
+    });
+    if (risk === 'risky') this.riskyExecuted = true;
+    this.humanActions.push(step);
+    await this.event({ type: 'human_action', actor: 'human', stepId, step });
+    this.onHumanStep({ step, target, baseline, before, after });
+    this.log(
+      `human: ${step.intent}${node ? '' : ' (element was not in the last observation; structural target)'}`,
+    );
+    return step;
+  }
+
+  /** The escalation block of the result: the last escalation and every human action of the run. */
+  protected escalationBlock(): EscalationBlock | undefined {
+    const e = this.lastEscalation;
+    if (!e?.resolution) return undefined;
+    return {
+      id: e.id,
+      cause: e.cause,
+      humanActions: this.humanActions,
+      resolution: e.resolution.kind,
+      ...(e.resolution.by ? { operatorId: e.resolution.by } : {}),
+    };
+  }
+
+  /**
+   * Gives the page a moment to react before the next observation: an action that navigates would
+   * otherwise be observed on the page it left. Bounded, since some actions change nothing visible.
+   */
+  protected async settleAfter(before: SurfaceObservation): Promise<void> {
+    const digest = digestOf(before);
+    const deadline = Date.now() + 1_500;
+    while (Date.now() < deadline) {
+      const now = await this.deps.surface.observe({ screenshot: false });
+      if (digestOf(now) !== digest) return;
+      await sleep(100);
     }
   }
 
@@ -543,9 +906,10 @@ export abstract class EngineBase {
 
   /**
    * Acts on a verdict (D-034). `allow` returns the effective risk; `block` stops the run before
-   * anything executes; `confirm` asks the operator, and with none attached the run ends with
-   * `ESCALATION_ABANDONED`, since it needed a human and had none. Nothing has run: `sideEffects`
-   * stays `none`.
+   * anything executes; `confirm` escalates with CONFIRM_REQUIRED: approve_step runs the step,
+   * resume and mark_complete mean the operator did it by hand (signal for the outer loop), abort
+   * stops as POLICY_BLOCKED, and with nobody answering the run ends with ESCALATION_ABANDONED.
+   * Nothing has run in the last three cases: `sideEffects` stays `none`.
    */
   protected async enforce(
     gate: GateResult,
@@ -564,64 +928,75 @@ export abstract class EngineBase {
         ctx.stepId,
       );
     }
-    const answer = await this.confirm({
-      ...ctx,
-      cause: 'CONFIRM_REQUIRED',
+    const hb = await this.confirm({
+      stepId: ctx.stepId,
+      intent: ctx.intent,
       rule: v.rule,
       reason: v.reason,
     });
-    if (answer.answer === 'approved') return 'risky';
-    if (answer.answer === 'denied') {
-      throw new Stop(
-        {
-          kind: 'failure',
-          failure: 'POLICY_BLOCKED',
-          expected: `operator ${answer.operatorId} to approve ${ctx.stepId}`,
-          observed: `${v.reason}; the operator denied it`,
-        },
-        ctx.stepId,
-      );
+    switch (hb.kind) {
+      case 'approve_step':
+        return 'risky';
+      case 'resume':
+      case 'mark_complete':
+        throw new HandBackSignal(hb.kind, ctx.stepId, this.lastEscalation as Escalation);
+      case 'abort':
+        throw new Stop(
+          {
+            kind: 'failure',
+            failure: 'POLICY_BLOCKED',
+            expected: `operator ${hb.operatorId} to approve ${ctx.stepId}`,
+            observed: `${v.reason}; the operator aborted`,
+          },
+          ctx.stepId,
+        );
+      case 'abandoned':
+        throw new Stop(
+          {
+            kind: 'failure',
+            failure: 'ESCALATION_ABANDONED',
+            expected: `an operator to confirm ${ctx.stepId} (CONFIRM_REQUIRED)`,
+            observed: `${v.reason}; ${this.deps.operator ? 'nobody claimed the escalation' : 'no operator is attached to this run'}`,
+          },
+          ctx.stepId,
+        );
     }
-    throw new Stop(
-      {
-        kind: 'failure',
-        failure: 'ESCALATION_ABANDONED',
-        expected: `an operator to confirm ${ctx.stepId} (CONFIRM_REQUIRED)`,
-        observed: `${v.reason}; no operator is attached to this run`,
-      },
-      ctx.stepId,
-    );
   }
 
-  /** Asks the attached operator, if any, and records the answer as a `confirmation` event. */
-  protected async confirm(
-    req: Omit<ConfirmRequest, 'runId' | 'phase' | 'screenshot'>,
-  ): Promise<{ answer: 'approved' | 'denied' | 'unattended'; operatorId?: string }> {
-    const operator = this.deps.operator;
-    let answer: 'approved' | 'denied' | 'unattended' = 'unattended';
-    if (operator) {
-      this.log(
-        `confirmation: ${req.cause} at ${req.stepId} (${req.reason}) → asking operator ${operator.info().id}`,
-      );
-      answer = await operator.confirm({
-        runId: this.run.id,
-        phase: this.phase,
-        ...req,
-        ...(this.lastScreenshot ? { screenshot: this.lastScreenshot } : {}),
-      });
-    }
+  /** A CONFIRM_REQUIRED escalation, recorded as a `confirmation` event however it ends. */
+  protected async confirm(req: {
+    stepId: string;
+    intent: string;
+    rule: string;
+    reason: string;
+  }): Promise<HandBackOutcome> {
+    const hb = await this.escalate({
+      cause: 'CONFIRM_REQUIRED',
+      detail: req.reason,
+      stepId: req.stepId,
+      stepIntent: req.intent,
+      suggestedActions: ['approve_step', 'resume', 'mark_complete', 'abort'],
+    });
+    const answer =
+      hb.kind === 'approve_step'
+        ? 'approved'
+        : hb.kind === 'abort'
+          ? 'denied'
+          : hb.kind === 'abandoned'
+            ? 'unattended'
+            : 'handled';
     await this.event({
       type: 'confirmation',
-      actor: answer === 'unattended' ? 'automation' : 'human',
+      actor: hb.kind === 'abandoned' ? 'automation' : 'human',
       stepId: req.stepId,
-      cause: req.cause,
+      cause: 'CONFIRM_REQUIRED',
       rule: req.rule,
       reason: req.reason,
       answer,
-      ...(operator ? { operatorId: operator.info().id } : {}),
+      ...(hb.kind !== 'abandoned' ? { operatorId: hb.operatorId } : {}),
     });
-    this.log(`confirmation: ${req.cause} at ${req.stepId} → ${answer}`);
-    return { answer, ...(operator ? { operatorId: operator.info().id } : {}) };
+    this.log(`confirmation: CONFIRM_REQUIRED at ${req.stepId} → ${answer}`);
+    return hb;
   }
 
   /** `button "Open Account"`, with sensitive values redacted for the operator's terminal. */
@@ -689,11 +1064,7 @@ export abstract class EngineBase {
           detail = `dismiss click refused by policy (${gate.verdict.rule}): ${gate.verdict.reason}`;
           break;
         }
-        const res = await this.deps.surface.act(click, {
-          actor: 'automation',
-          values: {},
-          baseUrl: this.baseUrl,
-        });
+        const res = await this.act(click, {});
         if (res.ok) outcome = 'recovered';
         else detail = `dismiss click failed: ${res.reason}: ${res.detail}`;
         break;
@@ -740,6 +1111,7 @@ export abstract class EngineBase {
         observed: `recovery budget (${this.budgets.recoveriesPerStep} per step) exhausted at ${stepId}; the condition still matches`,
       },
       stepId,
+      'RECOVERY_EXHAUSTED',
     );
   }
 
@@ -788,11 +1160,7 @@ export abstract class EngineBase {
       mismatch: gate.mismatch,
     });
     await this.enforce(gate, { stepId, intent: `open ${route}`, action });
-    const r = await this.deps.surface.act(action, {
-      actor: 'automation',
-      values: {},
-      baseUrl: this.baseUrl,
-    });
+    const r = await this.act(action, {});
     await this.event({
       type: 'action',
       actor: 'automation',

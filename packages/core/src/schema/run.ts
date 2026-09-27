@@ -62,10 +62,13 @@ export const RecordedStepSchema = z.strictObject({
 });
 export type RecordedStep = z.infer<typeof RecordedStepSchema>;
 
+/** The last escalation of the run and every human action recorded in it (D-036). */
 export const EscalationBlockSchema = z.strictObject({
   id: z.string().min(1),
+  cause: EscalationCauseSchema,
   humanActions: z.array(RecordedStepSchema),
-  resolution: z.enum(['resumed', 'completed_by_human', 'aborted']),
+  resolution: z.enum(['approved', 'resumed', 'completed_by_human', 'aborted', 'abandoned']),
+  operatorId: z.string().min(1).optional(),
 });
 export type EscalationBlock = z.infer<typeof EscalationBlockSchema>;
 
@@ -120,6 +123,7 @@ export const DiscoveryResultSchema = z.union([
     status: z.enum(['gave_up', 'limit', 'aborted']),
     reason: z.string().min(1),
     stepsRecorded: z.number().int().nonnegative(),
+    escalation: EscalationBlockSchema.optional(),
     evidence: EvidenceRefSchema,
   }),
 ]);
@@ -196,7 +200,8 @@ export const RunEventSchema = z.discriminatedUnion('type', [
     cause: EscalationCauseSchema,
     rule: z.string().min(1),
     reason: z.string().min(1),
-    answer: z.enum(['approved', 'denied', 'unattended']),
+    /** `handled`: the operator performed the step by hand and handed back with resume or mark_complete. */
+    answer: z.enum(['approved', 'denied', 'unattended', 'handled']),
     operatorId: z.string().min(1).optional(),
   }),
   z.strictObject({
@@ -236,6 +241,9 @@ export const RunEventSchema = z.discriminatedUnion('type', [
     to: ControlOwnerSchema,
     operatorId: z.string().optional(),
     cause: EscalationCauseSchema.optional(),
+    escalationId: z.string().min(1).optional(),
+    /** Set on the transfer that ends an escalation. */
+    handBack: z.enum(['approve_step', 'resume', 'mark_complete', 'abort', 'abandoned']).optional(),
   }),
   z.strictObject({
     ...eventBase,

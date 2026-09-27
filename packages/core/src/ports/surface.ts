@@ -66,10 +66,35 @@ export interface SurfaceInfo {
   name: string;
 }
 
+/**
+ * What the injected page script reports when a person acts in the browser during a handoff
+ * (01 §11, D-036): the element as the page describes it, never a coordinate.
+ */
+export interface HumanAction {
+  kind: 'click' | 'change' | 'submit';
+  at: string;
+  framePath: string[];
+  /** Frame URL when the action happened. */
+  url: string;
+  /** Structural path inside the frame, same convention as A11yNode.path. */
+  path: string;
+  role: string;
+  name: string;
+  /** New value of a changed control; never for password fields. */
+  value?: string | undefined;
+  inputType?: string | undefined;
+}
+
 export interface Surface {
   info(): SurfaceInfo;
   observe(options?: ObserveOptions): Promise<SurfaceObservation>;
   /** Targets inside `action` must be `{ ref }` values from the most recent observation. */
   act(action: Action, context: ActContext): Promise<ActResult>;
+  /**
+   * Reports what a person does in the browser while a listener is attached; returns the detach
+   * function. Nothing is reported while no listener is attached, so automation's own clicks are
+   * never mistaken for human ones.
+   */
+  captureHumanActions(listener: (action: HumanAction) => void): Promise<() => void>;
   close(): Promise<void>;
 }

@@ -1,0 +1,122 @@
+{
+  "status": "success",
+  "outputs": {
+    "confirmationNumber": "«confirmationNumber#sha256:37cbd7e1c844»"
+  },
+  "capability": {
+    "id": "open-sub-account",
+    "version": 2
+  },
+  "stepsRun": [
+    {
+      "stepId": "s1",
+      "attempts": 1,
+      "durationMs": 129,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s2",
+      "attempts": 1,
+      "durationMs": 164,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s3",
+      "attempts": 1,
+      "durationMs": 153,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s4",
+      "attempts": 1,
+      "durationMs": 148,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s5",
+      "attempts": 1,
+      "durationMs": 102,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s6",
+      "attempts": 1,
+      "durationMs": 117,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    }
+  ],
+  "recoveries": [],
+  "sideEffects": "committed",
+  "escalation": {
+    "id": "run_20260925_194803_060e-e1",
+    "cause": "CONFIRM_REQUIRED",
+    "humanActions": [
+      {
+        "id": "h1",
+        "intent": "Operator clicked button \"Open Account\"",
+        "action": {
+          "kind": "click",
+          "target": {
+            "spec": {
+              "strategies": [
+                {
+                  "kind": "role",
+                  "role": "button",
+                  "name": "Open Account"
+                },
+                {
+                  "kind": "structural",
+                  "path": "form[1] > table[1] > tr[3] > td[2] > input[1]"
+                }
+              ],
+              "framePath": [
+                "main"
+              ]
+            }
+          }
+        },
+        "target": {
+          "strategies": [
+            {
+              "kind": "role",
+              "role": "button",
+              "name": "Open Account"
+            },
+            {
+              "kind": "structural",
+              "path": "form[1] > table[1] > tr[3] > td[2] > input[1]"
+            }
+          ],
+          "framePath": [
+            "main"
+          ]
+        },
+        "recordedBy": "human",
+        "observedBefore": "ffe179dfb06c90e48923bb12",
+        "observedAfter": "d287b5ed4c4e630ba29b3627",
+        "resolvedBy": 0,
+        "candidateCount": 1,
+        "bindings": [],
+        "risk": "risky"
+      }
+    ],
+    "resolution": "resumed",
+    "operatorId": "demo-operator"
+  },
+  "evidence": {
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260925_194803_060e",
+    "lastObservation": "snapshots/e1-s7.json"
+  }
+}

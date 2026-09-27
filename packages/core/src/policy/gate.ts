@@ -88,6 +88,7 @@ export function permissivePolicy(baseUrl: string): Policy {
     riskyPatterns: { buttonText: [], formAction: [], routes: [] },
     riskyMode: { discovery: 'escalate', replay: 'require_approved' },
     escalationTimeoutMs: 600_000,
+    escalateOn: { replayFailure: true, recoveryExhausted: true },
     budgets: { recoveriesPerStep: 2, rebootstrapsPerRun: 1 },
     assistedFallback: { enabled: false, maxPerRun: 0 },
   };

@@ -20,7 +20,8 @@
     "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "schema:export": "pnpm --filter @handsoff/core schema:export"
+    "schema:export": "pnpm --filter @handsoff/core schema:export",
+    "demo:handoff": "tsx apps/runner/scripts/handoff-demo.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

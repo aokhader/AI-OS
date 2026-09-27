@@ -18,6 +18,7 @@
   },
   "riskyMode": { "discovery": "escalate", "replay": "require_approved" },
   "escalationTimeoutMs": 600000,
+  "escalateOn": { "replayFailure": true, "recoveryExhausted": true },
   "budgets": { "recoveriesPerStep": 2, "rebootstrapsPerRun": 1 },
   "assistedFallback": { "enabled": false, "maxPerRun": 2 }
 }

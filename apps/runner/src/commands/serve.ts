@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createApi } from '../server/api.js';
+import { consoleDistDir } from './live.js';
 import { loadEnv } from './replay.js';
 
 export interface ServeCommandOptions {
@@ -9,11 +9,10 @@ export interface ServeCommandOptions {
   dataDir?: string | undefined;
 }
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-
 /**
  * `handsoff serve`: the read API for the console, plus the console build when it exists
- * (01 §2). Runs until interrupted. WebSocket push and escalation controls arrive in P6.
+ * (01 §2). Runs until interrupted. Escalations are listed but not live here: claiming happens in
+ * the process that owns the browser (`handsoff replay … --operator console`, D-036).
  */
 export async function runServeCommand(opts: ServeCommandOptions): Promise<number> {
   loadEnv();
@@ -25,7 +24,7 @@ export async function runServeCommand(opts: ServeCommandOptions): Promise<number
   }
   const host = opts.host ?? '127.0.0.1';
   const dataDir = opts.dataDir ?? env.HANDSOFF_DATA_DIR ?? './data';
-  const consoleDist = path.resolve(here, '../../../operator-console/dist');
+  const consoleDist = consoleDistDir();
 
   const app = await createApi({ dataDir, consoleDist });
   await app.listen({ port, host });

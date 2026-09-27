@@ -342,7 +342,7 @@ type ReplayResult = (
   stepsRun: StepReport[];
   recoveries: Recovery[];
   sideEffects: SideEffects;
-  escalation?: { id: string; humanActions: RecordedStep[]; resolution: 'resumed' | 'completed_by_human' | 'aborted' };
+  escalation?: { id: string; cause: EscalationCause; humanActions: RecordedStep[]; resolution: 'approved' | 'resumed' | 'completed_by_human' | 'aborted' | 'abandoned'; operatorId?: string };   // the last escalation, every human action of the run (D-036)
   evidence: EvidenceRef;
 };
 
@@ -354,21 +354,40 @@ type DiscoveryResult =
 ### Escalation and session
 
 ```ts
+type HandBackKind = 'approve_step' | 'resume' | 'mark_complete' | 'abort';
+
 interface Escalation {
-  id: string;
+  id: string;                          // `${runId}-e${n}`
   runId: string;
+  phase: 'discovery' | 'replay';
+  capability?: CapabilityRef;          // what the run is doing, for the inbox …
+  goal?: string;                       // … or the discovery goal
   cause: EscalationCause;
   detail: string;
   atStep?: string;
   stepIntent?: string;
   screenshot: string;                  // masked, path
   snapshotDigest: string;
-  suggestedActions: Array<'approve_step' | 'resume' | 'mark_complete' | 'abort'>;
+  suggestedActions: HandBackKind[];
   requestedAt: string;
   claimedBy?: string;                  // free-text operator id in the demo
   claimedAt?: string;
-  resolution?: { kind: 'resumed' | 'completed_by_human' | 'aborted' | 'abandoned'; at: string; resumedAtStep?: string };
+  resolution?: { kind: 'approved' | 'resumed' | 'completed_by_human' | 'aborted' | 'abandoned'; at: string; by?: string; resumedAtStep?: string; humanActions?: number };
 }
+
+/** What the engine hands the Operator port with the record (D-036). */
+interface EscalationControls {
+  claim(operatorId: string): Promise<void>;                       // owner → human, capture starts
+  handBack(kind: HandBackKind, operatorId: string): Promise<void>; // owner → automation | aborted
+  current(): Escalation;
+  humanActions(): RecordedStep[];
+  onHumanAction(listener: (step: RecordedStep) => void): () => void;
+  settled: Promise<Escalation>;
+}
+interface Operator { info(): { id: string }; escalate(escalation: Escalation, controls: EscalationControls): void | Promise<void> }
+
+/** What the injected page script reports during a handoff; the engine turns it into a RecordedStep. */
+interface HumanAction { kind: 'click' | 'change' | 'submit'; at: string; framePath: string[]; url: string; path: string; role: string; name: string; value?: string; inputType?: string }
 
 interface SessionState { runId: string; controlOwner: ControlOwner; operatorId?: string; since: string }
 ```
@@ -419,7 +438,8 @@ interface Policy {
   allowedActions: Action['kind'][];
   riskyPatterns: { buttonText: string[]; formAction: string[]; routes: string[] };   // regex / glob
   riskyMode: { discovery: 'escalate' | 'block'; replay: 'require_approved' };
-  escalationTimeoutMs: number;
+  escalationTimeoutMs: number;          // until the claim, not after it
+  escalateOn: { replayFailure: boolean; recoveryExhausted: boolean };   // raised only with an operator attached (D-036)
   budgets: { recoveriesPerStep: number; rebootstrapsPerRun: number };
   assistedFallback: { enabled: boolean; maxPerRun: number };
 }
@@ -436,12 +456,12 @@ This document defines data. Behaviour lives behind the six port interfaces in [0
 
 | Port | Implemented by | One line |
 |---|---|---|
-| `Surface` | `@handsoff/surface-playwright` | observe, act on a ref, close; human-action capture in P6. Resolution is `resolveTarget()` in core, not a surface method |
+| `Surface` | `@handsoff/surface-playwright` | observe, act on a ref, `captureHumanActions` (an injected page script reports clicks, changes and Enter-key submits while a listener is attached), close. Resolution is `resolveTarget()` in core, not a surface method |
 | `Planner` | `@handsoff/llm-anthropic`, `@handsoff/llm-openai`; `ScriptedPlanner` in core for tests; all over the planner protocol in core | one `Decision` per observation during discovery |
 | `RecoveryPlanner` | a planner package, optional | at most one proposed `Action` for a failed replay step |
 | `Store` | filesystem implementation in core (`createFsStore`) | capabilities, runs (a `RunHandle` appends events and writes screenshots, snapshots and the result), escalations, app profiles; everything read from disk is validated with its zod schema |
 | `PolicyGate` | core (`checkPolicy`, a pure function) | `Verdict`, live risk and mismatch for every action before it executes, in both engines |
-| `Operator` | `handsoff` CLI (terminal, approve-all); console inbox in P6 | answers a `confirm` verdict; absent, replay stops before the step with `ESCALATION_ABANDONED` |
+| `Operator` | `handsoff` CLI: terminal, approve-all, or the console over the live API the run's process serves (`--operator console`) | receives every escalation with its controls: claim, hand back (`approve_step`, `resume`, `mark_complete`, `abort`), human-action feed; absent, the escalation is abandoned at once |
 | `Redactor` | core | masks observations, screenshots, params and transcripts |
 
 ## Example artifact
@@ -622,7 +642,8 @@ Points a reviewer should be able to check from this file alone: what the capabil
 | `HANDSOFF_PORT` | `4000` | embedded server |
 | `HANDSOFF_DATA_DIR` | `./data` | store |
 | `HANDSOFF_POLICY` | `./config/policy.json` | policy gate; the CLI refuses to run without it |
-| `HANDSOFF_OPERATOR` | `tty` in a terminal, `none` otherwise | who answers a `confirm` verdict: `tty`, `none`, `approve-all`; `--operator` overrides |
+| `HANDSOFF_OPERATOR` | `tty` in a terminal, `none` otherwise | who answers escalations: `tty`, `console` (serves the live API on `HANDSOFF_PORT` for the run), `approve-all`, `none`; `--operator` overrides |
+| `HANDSOFF_HOST` | `127.0.0.1` | bind address of the live API under `--operator console` |
 | `HANDSOFF_HEADLESS` | `false` | surface |
 | `HANDSOFF_MAX_STEPS` | `30` | discovery |
 | `HANDSOFF_STEP_TIMEOUT_MS` | `15000` | both engines; per-step ceiling on waits |

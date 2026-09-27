@@ -3,6 +3,7 @@ import type { ParamValues, SurfaceObservation } from '../ports/surface.js';
 import {
   type A11yNode,
   type Action,
+  type Actor,
   actionParams,
   type Baseline,
   type Binding,
@@ -38,6 +39,10 @@ export interface DiscoveredStep {
   /** The policy gate's verdict when the step ran (01 §7 step 6). Default safe. */
   risk?: Risk | undefined;
   confirm?: Confirm | undefined;
+  /** `human` for a step an operator performed during a handoff (D-036). Default automation. */
+  recordedBy?: Actor | undefined;
+  /** The action's parameter bindings were inferred by whole-field equality (D-013), not by provenance. */
+  inferred?: boolean | undefined;
 }
 
 export interface DiscoveredOutput {
@@ -101,7 +106,11 @@ export function compileCapability(input: CompileInput): Capability {
     const id = `s${i + 1}`;
     const post = derivePostcondition(id, d.before, d.after, d.target, input.values);
     const bindings: Binding[] = [
-      ...actionParams(d.action).map((u) => ({ param: u.param, field: u.field, inferred: false })),
+      ...actionParams(d.action).map((u) => ({
+        param: u.param,
+        field: u.field,
+        inferred: d.inferred ?? false,
+      })),
       ...post.bindings,
     ];
     steps.push({
@@ -115,7 +124,7 @@ export function compileCapability(input: CompileInput): Capability {
       risk: d.risk ?? 'safe',
       confirm: d.confirm ?? 'none',
       baseline: d.baseline ?? { resolvedBy: 0, candidateCount: 1 },
-      recordedBy: 'automation',
+      recordedBy: d.recordedBy ?? 'automation',
     });
   });
 

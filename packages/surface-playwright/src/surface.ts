@@ -8,6 +8,7 @@ import {
   BLOCKED_NAVIGATION_TEXT,
   type DialogInfo,
   type FrameInfo,
+  type HumanAction,
   MissingParamError,
   type ObserveOptions,
   resolveValue,
@@ -24,6 +25,7 @@ import {
   type Frame,
   type Page,
 } from 'playwright';
+import { installHumanCapture, type RawHumanEvent } from './capture.js';
 import { type RawSnapshot, snapshotDocument } from './snapshot.js';
 
 export interface PlaywrightSurfaceOptions {
@@ -94,6 +96,17 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * a resulting function, so the call and its argument are part of the expression.
  */
 const SNAPSHOT_SOURCE = snapshotDocument.toString();
+const CAPTURE_SOURCE = installHumanCapture.toString();
+const HUMAN_BINDING = '__handsoff_human';
+const CAPTURE_RESET_EXPRESSION =
+  '(window.__handsoff_capture_reset ? (window.__handsoff_capture_reset(), true) : false)';
+
+function captureExpression(): string {
+  return `(function () {
+  const __name = (fn) => fn;
+  return (${CAPTURE_SOURCE})(${JSON.stringify({ binding: HUMAN_BINDING })});
+})()`;
+}
 
 function snapshotExpression(start: number): string {
   return `(function () {
@@ -150,6 +163,7 @@ export async function createPlaywrightSurface(
   const page = await context.newPage();
   const surface = new PlaywrightSurface(browser, context, page, options);
   if (options.allowedOrigins) await surface.blockOriginsOutside(options.allowedOrigins);
+  await surface.installHumanCapture();
   return surface;
 }
 
@@ -160,6 +174,7 @@ export async function createPlaywrightSurface(
  */
 export class PlaywrightSurface implements Surface {
   private readonly refFrames = new Map<string, Frame>();
+  private readonly humanListeners = new Set<(action: HumanAction) => void>();
   private pendingDialog: Dialog | undefined;
   /** Observations in flight when a dialog opens; see raceDialog(). */
   private readonly dialogWaiters = new Set<() => void>();
@@ -230,6 +245,54 @@ export class PlaywrightSurface implements Surface {
 
   info(): SurfaceInfo {
     return { kind: 'legacy-web', name: 'playwright-chromium' };
+  }
+
+  /**
+   * Human-action capture (01 §11, D-036): a binding every frame can call plus an init script for
+   * documents loaded from now on. Frames already open get the script when capture starts. Events
+   * are dropped while nobody listens, so automation's own clicks are never reported.
+   */
+  async installHumanCapture(): Promise<void> {
+    await this.context.exposeBinding(HUMAN_BINDING, (source, raw: RawHumanEvent) => {
+      this.onHumanEvent(source.frame, raw);
+    });
+    await this.context.addInitScript(captureExpression());
+  }
+
+  async captureHumanActions(listener: (action: HumanAction) => void): Promise<() => void> {
+    const first = this.humanListeners.size === 0;
+    this.humanListeners.add(listener);
+    if (first) {
+      // Install in the frames already open (new documents get the init script) and forget any
+      // input automation produced, so only what the person does from now on is reported.
+      await Promise.all(
+        this.page.frames().map((frame) =>
+          frame
+            .evaluate(captureExpression())
+            .then(() => frame.evaluate(CAPTURE_RESET_EXPRESSION))
+            .catch(() => undefined),
+        ),
+      );
+    }
+    return () => {
+      this.humanListeners.delete(listener);
+    };
+  }
+
+  private onHumanEvent(frame: Frame, raw: RawHumanEvent): void {
+    if (this.humanListeners.size === 0) return;
+    const action: HumanAction = {
+      kind: raw.kind,
+      at: raw.at,
+      framePath: framePathOf(frame),
+      url: frame.url(),
+      path: raw.path,
+      role: raw.role,
+      name: raw.name,
+      ...(raw.value !== undefined ? { value: raw.value } : {}),
+      ...(raw.inputType !== undefined ? { inputType: raw.inputType } : {}),
+    };
+    for (const listener of this.humanListeners) listener(action);
   }
 
   async observe(options: ObserveOptions = {}): Promise<SurfaceObservation> {

@@ -1,0 +1,16 @@
+{
+  "id": "run_20260925_194803_060e",
+  "kind": "replay",
+  "capability": {
+    "id": "open-sub-account",
+    "version": 2
+  },
+  "target": {
+    "vendorProductId": "acme-coreteller",
+    "entry": "http://localhost:4100/"
+  },
+  "startedAt": "2026-09-26T02:48:03.310Z",
+  "controlOwner": "automation",
+  "sideEffects": "committed",
+  "finishedAt": "2026-09-26T02:48:06.897Z"
+}

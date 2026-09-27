@@ -31,8 +31,9 @@ import {
   EngineBase,
   type EngineDeps,
   type EngineTimeouts,
+  HandBackSignal,
+  type HumanStepRecord,
   Stop,
-  sleep,
 } from './base.js';
 import { resolveValue } from './values.js';
 
@@ -105,8 +106,9 @@ class DiscoveryEngine extends EngineBase {
   private readonly values: ParamValues;
   private readonly steps: DiscoveredStep[] = [];
   private readonly recorded: RecordedStep[] = [];
-  private readonly signatures: string[] = [];
-  private readonly digests: string[] = [];
+  private signatures: string[] = [];
+  private digests: string[] = [];
+  private firstObservation: SurfaceObservation | undefined;
 
   constructor(
     private readonly options: DiscoverOptions,
@@ -119,6 +121,48 @@ class DiscoveryEngine extends EngineBase {
     this.sensitive = options.params
       .filter((p) => p.sensitivity === 'sensitive' || p.sensitivity === 'secret')
       .map((p) => ({ name: p.name, value: p.value }));
+    this.allValues = Object.values(this.values);
+  }
+
+  protected override escalationSubject(): { goal: string } {
+    return { goal: this.options.goal };
+  }
+
+  /** A step the operator performed during a handoff joins the recording and compiles like any other. */
+  protected override onHumanStep(h: HumanStepRecord): void {
+    const targeted = h.step.action.kind !== 'press';
+    // A typed or selected value equal to a parameter value, whole field only, is recorded as that
+    // parameter with an inferred binding (D-013), so a sensitive value never lands in the artifact.
+    let action = h.step.action;
+    let inferred = false;
+    if ((action.kind === 'type' || action.kind === 'select') && 'text' in action.value) {
+      const text = action.value.text;
+      const param = Object.entries(this.values).find(([, v]) => v === text)?.[0];
+      if (param !== undefined) {
+        action = { ...action, value: { param } };
+        inferred = true;
+      }
+    }
+    this.steps.push({
+      intent: h.step.intent,
+      action,
+      ...(targeted ? { target: h.target, baseline: h.baseline } : {}),
+      before: h.before,
+      after: h.after,
+      risk: h.step.risk,
+      confirm: 'none',
+      recordedBy: 'human',
+      inferred,
+    });
+    this.recorded.push({
+      ...h.step,
+      action,
+      bindings: inferred
+        ? actionParams(action).map((u) => ({ param: u.param, field: u.field, inferred: true }))
+        : [],
+    });
+    this.signatures.push(`human:${h.step.id}`);
+    this.digests.push(digestOf(h.after));
   }
 
   async execute(): Promise<DiscoveryResult> {
@@ -154,16 +198,40 @@ class DiscoveryEngine extends EngineBase {
       if (this.requiresAuth) await this.bootstrap();
       this.currentStep = 'entry';
       await this.navigate(entryRoute, 'entry');
-      const finish = await this.loop();
+      let finish: Awaited<ReturnType<typeof this.loop>>;
+      try {
+        finish = await this.loop();
+      } catch (err) {
+        // The operator marked the goal complete: compile what was recorded, human steps included.
+        if (!(err instanceof HandBackSignal) || err.kind !== 'mark_complete') throw err;
+        if (this.steps.length === 0) {
+          throw new Stop(
+            {
+              kind: 'stopped',
+              status: 'aborted',
+              reason: 'the operator marked the goal complete before any step was recorded',
+            },
+            err.stepId,
+          );
+        }
+        const finalObservation = await this.observe('complete', err.stepId);
+        finish = {
+          outputs: [],
+          finalObservation,
+          firstObservation: this.firstObservation ?? finalObservation,
+        };
+      }
       const capability = this.compile(finish, run);
       await this.deps.store.capabilities.put(capability);
       this.log(
         `compiled ${capability.id} v${capability.version} (${capability.steps.length} steps)`,
       );
+      const escalation = this.escalationBlock();
       result = {
         status: 'compiled',
         capability: { id: capability.id, version: capability.version },
         stepsRecorded: this.recorded.length,
+        ...(escalation ? { escalation } : {}),
         evidence: this.evidence(false),
       };
     } catch (err) {
@@ -178,12 +246,13 @@ class DiscoveryEngine extends EngineBase {
         .join('\n')
         .concat('\n'),
     );
-    await this.event({ type: 'result', actor: 'automation', result });
+    const persisted = redactJson(result, this.sensitive);
+    await this.event({ type: 'result', actor: 'automation', result: persisted });
     await this.run.update({
       finishedAt: this.now().toISOString(),
       sideEffects: this.sideEffects(),
     });
-    await this.run.finish(result);
+    await this.run.finish(persisted);
     this.log(`discovery ${run.id} finished: ${result.status}`);
     return result;
   }
@@ -205,18 +274,18 @@ class DiscoveryEngine extends EngineBase {
     }));
     let lastAction: PlannerTurn['lastAction'];
     let pending: PendingStep | undefined;
-    let firstObservation: SurfaceObservation | undefined;
 
     for (let turn = 1; turn <= maxSteps; turn++) {
       this.checkRunTimeout();
       this.currentStep = `t${turn}`;
       const obs = await this.checkDetectors(await this.observe('turn', `t${turn}`), `t${turn}`);
-      firstObservation ??= obs;
+      this.firstObservation ??= obs;
+      const firstObservation = this.firstObservation;
       if (pending) {
         this.commit(pending, obs);
         pending = undefined;
       }
-      this.checkStuck(obs);
+      await this.checkStuck(obs);
 
       const redacted = redactObservation(obs, this.sensitive);
       const decision = await planner.decide({
@@ -253,15 +322,36 @@ class DiscoveryEngine extends EngineBase {
             { kind: 'stopped', status: 'gave_up', reason: decision.reason },
             `t${turn}`,
           );
-        case 'request_human':
+        case 'request_human': {
+          const hb = await this.escalate({
+            cause: 'PLANNER_REQUESTED',
+            detail: decision.reason,
+            stepId: `t${turn}`,
+            suggestedActions: ['resume', 'mark_complete', 'abort'],
+          });
+          if (hb.kind === 'resume') {
+            lastAction = {
+              decision,
+              status: 'ok',
+              detail: `an operator took over, performed ${hb.humanActions} action(s) in the browser and handed back; continue from the current page`,
+            };
+            break;
+          }
+          if (hb.kind === 'mark_complete') {
+            throw new HandBackSignal('mark_complete', `t${turn}`, this.lastEscalation as never);
+          }
           throw new Stop(
             {
               kind: 'stopped',
-              status: 'gave_up',
-              reason: `the model asked for an operator: ${decision.reason} (escalation arrives in P6)`,
+              status: 'aborted',
+              reason:
+                hb.kind === 'abandoned'
+                  ? `the model asked for an operator (${decision.reason}) and nobody answered`
+                  : `operator ${hb.operatorId} aborted after the model asked for help: ${decision.reason}`,
             },
             `t${turn}`,
           );
+        }
         case 'tool': {
           const outcome = await this.perform(decision, obs, turn);
           lastAction = { decision, status: outcome.status, detail: outcome.detail };
@@ -274,20 +364,6 @@ class DiscoveryEngine extends EngineBase {
       { kind: 'stopped', status: 'limit', reason: `step limit of ${maxSteps} reached` },
       this.currentStep,
     );
-  }
-
-  /**
-   * Gives the page a moment to react before the next observation: a click that navigates would
-   * otherwise be observed on the page it left. Bounded, since some actions change nothing visible.
-   */
-  private async settleAfter(before: SurfaceObservation): Promise<void> {
-    const digest = digestOf(before);
-    const deadline = Date.now() + 1_500;
-    while (Date.now() < deadline) {
-      const now = await this.deps.surface.observe({ screenshot: false });
-      if (digestOf(now) !== digest) return;
-      await sleep(100);
-    }
   }
 
   private async perform(
@@ -349,40 +425,42 @@ class DiscoveryEngine extends EngineBase {
       };
     }
     if (gate.verdict.kind === 'confirm') {
-      const answer = await this.confirm({
+      const hb = await this.confirm({
         stepId,
         intent: decision.intent,
-        action,
-        ...(node ? { target: this.describeNode(node) } : {}),
-        cause: 'CONFIRM_REQUIRED',
         rule: gate.verdict.rule,
         reason: gate.verdict.reason,
       });
-      if (answer.answer === 'denied') {
-        return {
-          status: 'blocked',
-          detail: `the operator denied this risky action (${gate.verdict.reason}). Choose another route or give up`,
-        };
+      switch (hb.kind) {
+        case 'approve_step':
+          risk = 'risky';
+          confirm = 'operator';
+          break;
+        case 'resume':
+          return {
+            status: 'ok',
+            detail: `an operator performed this risky step by hand (${hb.humanActions} action(s) recorded) and handed back; continue from the current page`,
+          };
+        case 'mark_complete':
+          throw new HandBackSignal('mark_complete', stepId, this.lastEscalation as never);
+        case 'abort':
+          return {
+            status: 'blocked',
+            detail: `the operator refused this risky action (${gate.verdict.reason}). Choose another route or give up`,
+          };
+        case 'abandoned':
+          return {
+            status: 'blocked',
+            detail: `this action is risky (${gate.verdict.reason}) and needs an operator's confirmation, but nobody answered. Choose another route or give up`,
+          };
       }
-      if (answer.answer === 'unattended') {
-        return {
-          status: 'blocked',
-          detail: `this action is risky (${gate.verdict.reason}) and needs an operator's confirmation, but no operator is attached to this run. Choose another route or give up`,
-        };
-      }
-      risk = 'risky';
-      confirm = 'operator';
     }
 
     const paramValues = Object.values(this.values);
     const target = node ? deriveTargetSpec(node, obs.nodes, paramValues) : undefined;
     const baseline = target ? baselineOf(target, obs.nodes) : undefined;
     const started = Date.now();
-    const r = await this.deps.surface.act(action, {
-      actor: 'automation',
-      values: this.values,
-      baseUrl: this.baseUrl,
-    });
+    const r = await this.act(action, this.values);
     await this.event({
       type: 'action',
       actor: 'automation',
@@ -500,46 +578,86 @@ class DiscoveryEngine extends EngineBase {
         continue;
       }
       await this.snapshot(stepId, current);
+      if (c.kind === 'escalate') {
+        const hb = await this.escalate({
+          cause: 'CONDITION_ESCALATE',
+          detail: `condition ${c.condition.id} matched${c.condition.message ? `: ${c.condition.message}` : ''}`,
+          stepId,
+          suggestedActions: ['resume', 'mark_complete', 'abort'],
+        });
+        if (hb.kind === 'resume') {
+          current = await this.observe('turn', stepId);
+          continue;
+        }
+        if (hb.kind === 'mark_complete') {
+          throw new HandBackSignal('mark_complete', stepId, this.lastEscalation as never);
+        }
+        throw new Stop(
+          {
+            kind: 'stopped',
+            status: 'aborted',
+            reason:
+              hb.kind === 'abandoned'
+                ? `condition ${c.condition.id} requires an operator and nobody answered`
+                : `operator ${hb.operatorId} aborted at condition ${c.condition.id}`,
+          },
+          stepId,
+        );
+      }
       const reason =
         c.kind === 'outcome'
           ? `${c.code}: ${c.message}`
           : c.kind === 'fail'
             ? `${c.failure}: ${c.observed}`
-            : c.kind === 'recover'
-              ? `session lost (${c.condition.id}); discovery cannot sign in again mid-flow`
-              : `condition ${c.condition.id} requires an operator (P6)`;
+            : `session lost (${c.condition.id}); discovery cannot sign in again mid-flow`;
       throw new Stop({ kind: 'stopped', status: 'aborted', reason }, stepId);
     }
   }
 
-  private checkStuck(obs: SurfaceObservation): void {
+  /** The stuck detector (01 §6) escalates with STUCK; a resume clears its memory. */
+  private async checkStuck(obs: SurfaceObservation): Promise<void> {
     const n = STUCK_REPEATS;
     const last = this.signatures.slice(-n);
+    let reason: string | undefined;
     if (last.length === n && last.every((s) => s === last[0])) {
-      throw new Stop(
-        {
-          kind: 'stopped',
-          status: 'limit',
-          reason: `stuck: the same action was repeated ${n} times`,
-        },
-        this.currentStep,
-      );
+      reason = `stuck: the same action was repeated ${n} times`;
     }
     const digests = [...this.digests.slice(-(n - 1)), digestOf(obs)];
     if (
+      !reason &&
       this.digests.length >= n - 1 &&
       digests.every((d) => d === digests[0]) &&
       this.steps.length >= n
     ) {
-      throw new Stop(
-        {
-          kind: 'stopped',
-          status: 'limit',
-          reason: `stuck: ${n} actions produced no observable change`,
-        },
-        this.currentStep,
-      );
+      reason = `stuck: ${n} actions produced no observable change`;
     }
+    if (!reason) return;
+    const stepId = this.currentStep ?? 'run';
+    const hb = await this.escalate({
+      cause: 'STUCK',
+      detail: reason,
+      stepId,
+      suggestedActions: ['resume', 'mark_complete', 'abort'],
+    });
+    if (hb.kind === 'resume') {
+      this.signatures = [];
+      this.digests = [];
+      return;
+    }
+    if (hb.kind === 'mark_complete') {
+      throw new HandBackSignal('mark_complete', stepId, this.lastEscalation as never);
+    }
+    throw new Stop(
+      {
+        kind: 'stopped',
+        status: 'limit',
+        reason:
+          hb.kind === 'abandoned'
+            ? `${reason}; nobody answered the escalation`
+            : `${reason}; operator ${hb.operatorId} aborted`,
+      },
+      stepId,
+    );
   }
 
   // ---- compile and results -------------------------------------------------------------------
@@ -600,6 +718,7 @@ class DiscoveryEngine extends EngineBase {
   }
 
   private fromError(err: unknown): DiscoveryResult {
+    const escalation = this.escalationBlock();
     if (err instanceof Stop) {
       const reason =
         err.reason.kind === 'stopped'
@@ -609,7 +728,13 @@ class DiscoveryEngine extends EngineBase {
             : `${err.reason.code}: ${err.reason.message}`;
       const status = err.reason.kind === 'stopped' ? err.reason.status : 'aborted';
       this.log(`stopped (${status}) at ${err.atStep ?? 'run'}: ${reason}`);
-      return { status, reason, stepsRecorded: this.recorded.length, evidence: this.evidence(true) };
+      return {
+        status,
+        reason,
+        stepsRecorded: this.recorded.length,
+        ...(escalation ? { escalation } : {}),
+        evidence: this.evidence(true),
+      };
     }
     const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     this.log(`engine error: ${message}`);
@@ -617,6 +742,7 @@ class DiscoveryEngine extends EngineBase {
       status: 'aborted',
       reason: message,
       stepsRecorded: this.recorded.length,
+      ...(escalation ? { escalation } : {}),
       evidence: this.evidence(true),
     };
   }

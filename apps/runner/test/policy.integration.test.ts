@@ -110,7 +110,8 @@ describe('policy gate and redaction', () => {
 
   const operator = (answer: 'approved' | 'denied'): Operator => ({
     info: () => ({ id: `test:${answer}` }),
-    confirm: async () => answer,
+    escalate: (_e, controls) =>
+      controls.handBack(answer === 'approved' ? 'approve_step' : 'abort', `test:${answer}`),
   });
 
   it('blocks off-allowlist navigations at the gate and a clicked external link at the network layer', async () => {
@@ -361,7 +362,7 @@ describe('policy gate and redaction', () => {
       if (result.status !== 'failure') return;
       expect(result.kind).toBe('POLICY_BLOCKED');
       expect(result.atStep).toBe('s7');
-      expect(result.observed).toContain('denied');
+      expect(result.observed).toContain('aborted');
       expect(result.sideEffects).toBe('none');
     }, 120_000);
   });
@@ -378,9 +379,9 @@ describe('policy gate and redaction', () => {
     const approvals: string[] = [];
     const attended: Operator = {
       info: () => ({ id: 'test:attended' }),
-      confirm: async (req) => {
-        approvals.push(`${req.stepId}:${req.rule}`);
-        return 'approved';
+      escalate: async (e, controls) => {
+        approvals.push(`${e.atStep}:${e.cause}`);
+        await controls.handBack('approve_step', 'test:attended');
       },
     };
     const surface = await createPlaywrightSurface({
@@ -435,7 +436,7 @@ describe('policy gate and redaction', () => {
     }
     expect(result.status, JSON.stringify(result, null, 2)).toBe('compiled');
     if (result.status !== 'compiled') return;
-    expect(approvals).toEqual(['t7:riskyPatterns.buttonText[6]']);
+    expect(approvals).toEqual(['t7:CONFIRM_REQUIRED']);
     const capability = await store.capabilities.get('open-sub-account-scripted');
     expect(capability?.steps.map((s) => [s.id, s.risk, s.confirm])).toEqual([
       ['s1', 'safe', 'none'],

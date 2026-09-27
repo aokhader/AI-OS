@@ -410,7 +410,7 @@ stateDiagram-v2
 | `RECOVERY_EXHAUSTED` | a recovery budget ran out and policy says escalate |
 | `REPLAY_FAILURE` | a `fail` classification and policy says escalate rather than stop |
 
-**The intervention request** is written to the run folder as `escalation.json` and pushed over WebSocket. It carries: capability id and version or the discovery goal; run id; current step id and intent; the cause; the latest masked screenshot and redacted snapshot; the last three events; and suggested actions (for `CONFIRM_REQUIRED`: "approve this step" or "abort").
+**The intervention request** is written to the store and to the run folder as `escalation.json`, and pushed over WebSocket (`/ws`) by the process that owns the browser. It carries: capability id and version or the discovery goal; run id and phase; current step id and intent; the cause and its detail; the latest masked screenshot and the redacted snapshot's digest; and the suggested hand-backs (for `CONFIRM_REQUIRED`: approve the step, resume, mark complete or abort; for every other cause the last three). One core path raises every cause ([D-036](08-decision-log.md#d-036--escalation-is-one-port-with-claim-and-hand-back-the-runner-embeds-the-live-api-only-for-the-run-it-owns)): the `Operator` port receives the record with an `EscalationControls` object whose `claim` and `handBack` are the whole contract. `REPLAY_FAILURE` and `RECOVERY_EXHAUSTED` are raised only when `policy.escalateOn` says so **and** an operator is attached, since nobody else can answer them; unattended runs fail as classified. With no operator attached the other causes are resolved `abandoned` at once.
 
 **Taking control** ([D-012](08-decision-log.md#d-012--handoff-via-the-headed-browser-with-captured-human-actions-no-screencast)). The operator opens the escalation in the console and clicks *Claim*. The owner becomes `human`. The operator then works in the headed browser window, which is the very same browser context automation was driving. The surface has already injected a small script into every frame (`addInitScript` plus an exposed binding) that reports `click`, `change` and `submit` events with the target element's accessibility properties and a structural path. The runner turns each report into a `RecordedStep` tagged `actor: 'human'`, with a full `TargetSpec` derived the same way as automation steps, and appends it to the run log. Human actions are therefore first-class steps: they can be reviewed, and a discovery run that needed a human still compiles into a complete capability.
 
@@ -420,7 +420,9 @@ stateDiagram-v2
 - **Mark complete.** The engine treats the goal as achieved, verifies the capability's `success` condition, and **re-extracts outputs from the live page** using the output specs. The operator never types a result.
 - **Abort.** Owner becomes `aborted`; result is `failure` with the cause and `sideEffects` computed from what executed.
 
-If nobody claims within `escalationTimeoutMs` the run ends with `ESCALATION_ABANDONED`.
+If nobody claims within `escalationTimeoutMs` the run ends with `ESCALATION_ABANDONED`; the timer runs until the claim and not after it, since a claimed session belongs to the person until they hand it back. Abort keeps the failure that caused the escalation (or `POLICY_BLOCKED` for a refused confirmation); abandonment and abort both leave `sideEffects` at whatever had executed.
+
+**Where a person answers.** `--operator tty` asks in the terminal that runs the CLI; `--operator console` serves the console API from the run's own process for as long as it runs, so the inbox can claim and hand back over HTTP and the console follows the human actions over the socket; `--operator approve-all` approves every confirmation and aborts anything else; `--operator none` attaches nobody. `handsoff serve` lists the same records read-only and answers a claim with 409, since it does not own a browser.
 
 **Preserved across the handoff:** the same browser context, cookies and open frames; the same run folder; one contiguous event log with actor tags on every action; the `escalation` block in the final result.
 
@@ -443,6 +445,7 @@ Policy is one file, `config/policy.json` ([D-015](08-decision-log.md#d-015--risk
   },
   "riskyMode": { "discovery": "escalate", "replay": "require_approved" },
   "escalationTimeoutMs": 600000,
+  "escalateOn": { "replayFailure": true, "recoveryExhausted": true },
   "budgets": { "recoveriesPerStep": 2, "rebootstrapsPerRun": 1 },
   "assistedFallback": { "enabled": false, "maxPerRun": 2 }
 }

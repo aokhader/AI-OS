@@ -4,7 +4,7 @@ Computer-use automation for legacy banking software. An LLM figures out how to c
 
 Take-home assessment for interface.ai. The brief is at [docs/description.md](docs/description.md). The project's working knowledge base, read at the start of every session, is [docs/context/](docs/context/README.md).
 
-> Status: P0–P5 complete. Deterministic replay works end to end against the mock app; real model-driven discoveries (Gemini via Google AI Studio) compiled `get-member-savings-balance` v4 and the write flow `open-sub-account` v2, whose submit the policy gate classified risky and an operator confirmed at discovery; those runs are in [evidence/discovery-run](evidence/discovery-run) and [evidence/discovery-run-open-sub-account](evidence/discovery-run-open-sub-account). Every runtime condition in the brief is injectable in the mock app and answered by the classifier. Every action passes the policy gate before it executes, off-allowlist navigations are refused at the gate and at the network layer, and nothing persisted shows a sensitive value: screenshots are masked, logs carry hashed placeholders, sensitive outputs are masked in `result.json`. The console lists runs and capabilities. Next: P6 escalation and handoff. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
+> Status: P0–P6 complete. Deterministic replay works end to end against the mock app; real model-driven discoveries (Gemini via Google AI Studio) compiled `get-member-savings-balance` v4 and the write flow `open-sub-account` v2, whose submit the policy gate classified risky and an operator confirmed at discovery; those runs are in [evidence/discovery-run](evidence/discovery-run) and [evidence/discovery-run-open-sub-account](evidence/discovery-run-open-sub-account). Every runtime condition in the brief is injectable in the mock app and answered by the classifier. Every action passes the policy gate before it executes, off-allowlist navigations are refused at the gate and at the network layer, and nothing persisted shows a sensitive value: screenshots are masked, logs carry hashed placeholders, sensitive outputs are masked in `result.json`. When a run needs a person, it escalates: the console shows why, the person claims it, works in the very browser window automation was driving, and hands back; their actions are recorded as steps and automation continues from the checkpoints. Next: P7 cross-tenant variant. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
 
 ## Layout
 
@@ -73,7 +73,19 @@ pnpm handsoff replay --capability open-sub-account --param memberId=10001 --para
 pnpm handsoff replay --capability open-sub-account --param memberId=10001 --param accountType=Checking --param deposit=40.00 --operator approve-all   # success with a confirmation number, side effects committed
 ```
 
-`--operator approve-all` stands in for an operator who pre-approved the run; add `--chaos validation` to see the submit rejected once (`outcome VALIDATION_REJECTED` at s7, exit 3). Navigations outside the allowlist are refused twice: by the gate, which tells the model or fails the replay with `POLICY_BLOCKED`, and by the browser layer, which answers any request to another origin with a block page ([evidence/discovery-policy-blocked](evidence/discovery-policy-blocked) shows both). Sensitive parameter values never reach the model or the disk: the model sees `{memberId}`, everything persisted carries `«memberId#sha256:…»`, screenshots are painted over wherever the value shows, and sensitive outputs are masked in `result.json` while the caller gets the real value on stdout.
+`--operator approve-all` stands in for an operator who pre-approved the run; add `--chaos validation` to see the submit rejected once (`outcome VALIDATION_REJECTED` at s7, exit 3).
+
+Hand the session to a person instead. With `--operator console` the run serves the console API itself; open the console, claim the escalation, and the browser window is yours:
+
+```bash
+pnpm handsoff replay --capability open-sub-account --param memberId=10001 --param accountType=Checking --param deposit=40.00 --operator console   # pauses at s7; claim it in the console
+```
+
+```bash
+pnpm console     # http://localhost:5173 → Escalations → claim → click Open Account in the browser window → Resume automation
+```
+
+Every click, change and Enter you make while you hold control is recorded as a step with a real locator, the run continues from the step checkpoints ("where did the person leave the page?"), and the result carries an `escalation` block with the cause, the resolution and your actions. *Approve step* lets automation run the step itself, *Mark complete* makes it verify the success condition and read the outputs from the page, *Abort* ends the run. A failure automation cannot fix (`TARGET_NOT_FOUND`, an error page) escalates the same way when an operator is attached and `policy.escalateOn` allows it; unattended, it stays a failure. In a plain terminal, `--operator tty` offers the same choices as prompts. `pnpm demo:handoff` runs the whole loop with a script standing in for the person at the window; that is how [evidence/replay-escalation-handoff](evidence/replay-escalation-handoff) was made. Navigations outside the allowlist are refused twice: by the gate, which tells the model or fails the replay with `POLICY_BLOCKED`, and by the browser layer, which answers any request to another origin with a block page ([evidence/discovery-policy-blocked](evidence/discovery-policy-blocked) shows both). Sensitive parameter values never reach the model or the disk: the model sees `{memberId}`, everything persisted carries `«memberId#sha256:…»`, screenshots are painted over wherever the value shows, and sensitive outputs are masked in `result.json` while the caller gets the real value on stdout.
 
 Discover a capability with a model. Put a key for any supported provider in `.env`; the free Google AI Studio tier is enough:
 
@@ -116,8 +128,8 @@ Runs show their result, step reports and a timeline with screenshots; capabiliti
 Checks:
 
 ```bash
-pnpm test               # schema, resolver, classifier, compiler, policy gate, redaction, planner, API and mock-app tests; no browser, no API key
-pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, every chaos mode, the gate at both layers, masking and the confirmation paths; no API key
+pnpm test               # schema, resolver, classifier, compiler, policy gate, redaction, control owner, checkpoint scan, human steps, planner, API and mock-app tests; no browser, no API key
+pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, every chaos mode, the gate at both layers, masking, and every escalation path including the live console API; no API key
 pnpm typecheck
 pnpm lint
 ```

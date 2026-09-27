@@ -18,6 +18,11 @@ export const PolicySchema = z.strictObject({
     replay: z.literal('require_approved'),
   }),
   escalationTimeoutMs: z.number().int().positive(),
+  /** Causes that only escalate when an operator is attached (D-036); unattended runs fail as classified. */
+  escalateOn: z.strictObject({
+    replayFailure: z.boolean(),
+    recoveryExhausted: z.boolean(),
+  }),
   budgets: z.strictObject({
     recoveriesPerStep: z.number().int().nonnegative(),
     rebootstrapsPerRun: z.number().int().nonnegative(),

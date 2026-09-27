@@ -1,12 +1,19 @@
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
 import {
   type CapabilityDetail,
   type CapabilityListItem,
+  type ClaimRequest,
   createFsStore,
   type DiscoveryResult,
+  type EscalationDetail,
+  type EscalationListItem,
+  HandBackKindSchema,
+  type HandBackRequest,
   KebabIdSchema,
+  type RecordedStep,
   type ReplayResult,
   type RunDetail,
   RunIdSchema,
@@ -14,13 +21,24 @@ import {
   type RunSummary,
 } from '@handsoff/core';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import type { LiveRegistry } from './live.js';
 
 export interface ApiOptions {
   dataDir: string;
   /** Built console to serve at `/`; skipped when the folder does not exist. */
   consoleDist?: string | undefined;
+  /** Escalations this process can act on (D-036). Absent, the escalation routes are read-only. */
+  live?: LiveRegistry | undefined;
   logger?: boolean | undefined;
 }
+
+const EscalationIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,80}$/);
+const ClaimSchema = z.strictObject({ operatorId: z.string().trim().min(1).max(80) });
+const HandBackSchema = z.strictObject({
+  operatorId: z.string().trim().min(1).max(80),
+  kind: HandBackKindSchema,
+});
 
 async function exists(p: string): Promise<boolean> {
   try {
@@ -145,6 +163,101 @@ export async function createApi(options: ApiOptions): Promise<FastifyInstance> {
       return 'code' in r ? reply.code(r.code).send({ error: r.error }) : r;
     },
   );
+
+  // ---- escalations (01 §11, D-036) ------------------------------------------------------------
+
+  const live = options.live;
+
+  app.get('/api/escalations', async (): Promise<EscalationListItem[]> => {
+    const items = (await store.escalations.list()).map((escalation) => {
+      const controls = live?.get(escalation.id);
+      const current = controls ? controls.current() : escalation;
+      return { escalation: current, open: !current.resolution, live: controls !== undefined };
+    });
+    return items.sort((a, b) => {
+      if (a.open !== b.open) return a.open ? -1 : 1;
+      return b.escalation.requestedAt.localeCompare(a.escalation.requestedAt);
+    });
+  });
+
+  app.get<{ Params: { id: string } }>('/api/escalations/:id', async (req, reply) => {
+    const id = EscalationIdSchema.safeParse(req.params.id);
+    if (!id.success) return reply.code(400).send({ error: 'invalid escalation id' });
+    const controls = live?.get(id.data);
+    const escalation = controls ? controls.current() : await store.escalations.get(id.data);
+    if (!escalation) return reply.code(404).send({ error: 'escalation not found' });
+    let humanActions: RecordedStep[];
+    if (controls) {
+      humanActions = controls.humanActions();
+    } else {
+      const events = await store.runs.events(escalation.runId);
+      humanActions = events.flatMap((e) => (e.type === 'human_action' ? [e.step] : []));
+    }
+    const detail: EscalationDetail = {
+      escalation,
+      humanActions,
+      open: !escalation.resolution,
+      live: controls !== undefined,
+    };
+    return detail;
+  });
+
+  const notLive = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }) =>
+    reply.code(409).send({
+      error:
+        'this escalation is not live in this process; claim it from the process that owns the browser (handsoff replay … --operator console)',
+    });
+
+  app.post<{ Params: { id: string }; Body: ClaimRequest }>(
+    '/api/escalations/:id/claim',
+    async (req, reply) => {
+      const id = EscalationIdSchema.safeParse(req.params.id);
+      if (!id.success) return reply.code(400).send({ error: 'invalid escalation id' });
+      const body = ClaimSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'operatorId is required' });
+      const controls = live?.get(id.data);
+      if (!controls) return notLive(reply);
+      try {
+        await controls.claim(body.data.operatorId);
+      } catch (err) {
+        return reply.code(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+      return { escalation: controls.current() };
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: HandBackRequest }>(
+    '/api/escalations/:id/hand-back',
+    async (req, reply) => {
+      const id = EscalationIdSchema.safeParse(req.params.id);
+      if (!id.success) return reply.code(400).send({ error: 'invalid escalation id' });
+      const body = HandBackSchema.safeParse(req.body);
+      if (!body.success) {
+        return reply.code(400).send({
+          error: `operatorId and kind (${HandBackKindSchema.options.join(' | ')}) are required`,
+        });
+      }
+      const controls = live?.get(id.data);
+      if (!controls) return notLive(reply);
+      try {
+        await controls.handBack(body.data.kind, body.data.operatorId);
+      } catch (err) {
+        return reply.code(409).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+      return { escalation: controls.current() };
+    },
+  );
+
+  // Push: every escalation change and human action, so the console never has to poll for them.
+  await app.register(fastifyWebsocket);
+  app.get('/ws', { websocket: true }, (socket) => {
+    if (!live) return;
+    const unsubscribe = live.subscribe((message) => {
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
+    });
+    socket.on('close', unsubscribe);
+    socket.on('error', unsubscribe);
+  });
 
   const dist = options.consoleDist;
   if (dist && (await exists(path.join(dist, 'index.html')))) {

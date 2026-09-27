@@ -1,0 +1,30 @@
+{
+  "id": "run_20260925_194803_060e-e1",
+  "runId": "run_20260925_194803_060e",
+  "phase": "replay",
+  "capability": {
+    "id": "open-sub-account",
+    "version": 2
+  },
+  "cause": "CONFIRM_REQUIRED",
+  "detail": "the button \"Open Account\" matches the risky pattern /open account/i; the step requires operator confirmation",
+  "atStep": "s7",
+  "stepIntent": "Click Open Account button",
+  "screenshot": "steps/020-s7-escalation.png",
+  "snapshotDigest": "ffe179dfb06c90e48923bb12",
+  "suggestedActions": [
+    "approve_step",
+    "resume",
+    "mark_complete",
+    "abort"
+  ],
+  "requestedAt": "2026-09-26T02:48:06.354Z",
+  "claimedBy": "demo-operator",
+  "claimedAt": "2026-09-26T02:48:06.537Z",
+  "resolution": {
+    "kind": "resumed",
+    "at": "2026-09-26T02:48:06.812Z",
+    "by": "demo-operator",
+    "humanActions": 1
+  }
+}

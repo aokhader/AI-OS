@@ -16,7 +16,13 @@ import {
 
 function statusOf(item: RunListItem): { status: string; detail?: string | undefined } {
   const s = item.summary;
-  if (!s) return { status: item.run.finishedAt ? 'unknown' : 'running' };
+  if (!s) {
+    // A live run that is waiting for, or with, a person shows its control owner (01 §11).
+    if (!item.run.finishedAt && item.run.controlOwner !== 'automation') {
+      return { status: item.run.controlOwner };
+    }
+    return { status: item.run.finishedAt ? 'unknown' : 'running' };
+  }
   return { status: s.status, detail: s.code ?? s.kind ?? s.reason };
 }
 

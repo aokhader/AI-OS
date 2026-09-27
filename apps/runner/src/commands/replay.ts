@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createFsStore, ReplayArgumentError, type ReplayResult, replay } from '@handsoff/core';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
+import { startLiveApi } from './live.js';
 import { resolveOperator } from './operator.js';
 import { requirePolicy } from './policy.js';
 
@@ -111,13 +112,16 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
     console.error(picked.error);
     return 2;
   }
-  const { operator, mode } = picked.value;
+  const { operator, mode, registry } = picked.value;
 
   const baseUrl = opts.baseUrl ?? env.HANDSOFF_TARGET_URL ?? 'http://localhost:4100';
   const headless = opts.headless ?? env.HANDSOFF_HEADLESS === 'true';
   console.error(
     `handsoff replay ${capability.id} v${capability.version} (${capability.status}) against ${baseUrl} (${headless ? 'headless' : 'headed'}) · operator ${mode}`,
   );
+
+  const live = registry ? await startLiveApi({ dataDir, env, registry }) : undefined;
+  if (live) console.error(`live console API on ${live.url} (escalations are claimed there)`);
 
   const started = Date.now();
   const surface = await createPlaywrightSurface({
@@ -146,6 +150,7 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
     throw err;
   } finally {
     await surface.close();
+    await live?.close();
   }
 
   console.error(summarize(result, Date.now() - started));

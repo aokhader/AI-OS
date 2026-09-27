@@ -7,6 +7,7 @@ import {
   AppProfileSchema,
   CapabilitySchema,
   ConditionSchema,
+  EscalationSchema,
   PolicySchema,
   ReplayResultSchema,
   RunEventSchema,
@@ -274,7 +275,12 @@ describe('ReplayResultSchema', () => {
       status: 'success',
       outputs: {},
       ...common,
-      escalation: { id: 'esc_1', humanActions: [], resolution: 'completed_by_human' },
+      escalation: {
+        id: 'esc_1',
+        cause: 'CONFIRM_REQUIRED',
+        humanActions: [],
+        resolution: 'completed_by_human',
+      },
     });
     expect(r.success, issues(r)).toBe(true);
   });
@@ -353,5 +359,49 @@ describe('A11yNodeSchema', () => {
       formAction: 'http://localhost:4100/members/10001/accounts/open',
     });
     expect(r.success, issues(r)).toBe(true);
+  });
+});
+
+describe('EscalationSchema (D-036)', () => {
+  const base = {
+    id: 'run_20260926_100000_0000-e1',
+    runId: 'run_20260926_100000_0000',
+    phase: 'replay',
+    capability: { id: 'open-sub-account', version: 2 },
+    cause: 'CONFIRM_REQUIRED',
+    detail: 'the button "Open Account" matches the risky pattern /open account/i',
+    atStep: 's7',
+    stepIntent: 'Click Open Account button',
+    screenshot: 'steps/019-s7-escalation.png',
+    snapshotDigest: 'abc',
+    suggestedActions: ['approve_step', 'resume', 'mark_complete', 'abort'],
+    requestedAt: '2026-09-26T10:00:01.000Z',
+  };
+
+  it('accepts an open request, a claimed one and every resolution', () => {
+    expect(EscalationSchema.safeParse(base).success).toBe(true);
+    const claimed = { ...base, claimedBy: 'operator', claimedAt: '2026-09-26T10:00:05.000Z' };
+    expect(EscalationSchema.safeParse(claimed).success).toBe(true);
+    for (const kind of ['approved', 'resumed', 'completed_by_human', 'aborted', 'abandoned']) {
+      const r = EscalationSchema.safeParse({
+        ...claimed,
+        resolution: { kind, at: '2026-09-26T10:01:00.000Z', by: 'operator', humanActions: 1 },
+      });
+      expect(r.success, issues(r)).toBe(true);
+    }
+  });
+
+  it('rejects an unknown hand-back and an unknown cause', () => {
+    expect(EscalationSchema.safeParse({ ...base, suggestedActions: ['retry'] }).success).toBe(
+      false,
+    );
+    expect(EscalationSchema.safeParse({ ...base, cause: 'LUNCH' }).success).toBe(false);
+  });
+
+  it('policy lists which failures escalate', () => {
+    const policy = readJson(path.join(repoRoot, 'config/policy.json')) as Record<string, unknown>;
+    expect(policy.escalateOn).toEqual({ replayFailure: true, recoveryExhausted: true });
+    const { escalateOn: _dropped, ...without } = policy;
+    expect(PolicySchema.safeParse(without).success).toBe(false);
   });
 });

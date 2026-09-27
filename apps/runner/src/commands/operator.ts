@@ -1,17 +1,22 @@
 import { createInterface } from 'node:readline/promises';
-import type { Action, ConfirmRequest, Operator } from '@handsoff/core';
+import type { Escalation, EscalationControls, HandBackKind, Operator } from '@handsoff/core';
+import { createConsoleOperator, LiveRegistry } from '../server/live.js';
 
 /**
- * Who answers a `confirm` verdict (D-034). `tty` asks in the terminal, `approve-all` answers yes
- * to everything (an attended discovery of a write flow), `none` attaches nobody, so replay stops
- * before a risky step with ESCALATION_ABANDONED and discovery is told to find another route.
+ * Who answers an escalation (D-034, D-036). `tty` asks in the terminal, `console` hands it to
+ * the operator console over the live API this process serves, `approve-all` approves every
+ * confirmation and aborts anything else (an attended discovery of a write flow), `none` attaches
+ * nobody, so the escalation is abandoned at once: replay stops before the step, discovery is told
+ * to find another route.
  */
-export type OperatorMode = 'tty' | 'none' | 'approve-all';
-export const OPERATOR_MODES: readonly OperatorMode[] = ['tty', 'none', 'approve-all'];
+export type OperatorMode = 'tty' | 'none' | 'approve-all' | 'console';
+export const OPERATOR_MODES: readonly OperatorMode[] = ['tty', 'none', 'approve-all', 'console'];
 
 export interface ResolvedOperator {
   mode: OperatorMode;
   operator: Operator | undefined;
+  /** Present for `console`: the live API serves it. */
+  registry: LiveRegistry | undefined;
 }
 
 /** `--operator`, else HANDSOFF_OPERATOR, else `tty` when stdin is a terminal and `none` otherwise. */
@@ -30,68 +35,101 @@ export function resolveOperator(
   const mode = raw as OperatorMode;
   switch (mode) {
     case 'none':
-      return { ok: true, value: { mode, operator: undefined } };
+      return { ok: true, value: { mode, operator: undefined, registry: undefined } };
     case 'approve-all':
-      return { ok: true, value: { mode, operator: createApproveAllOperator() } };
+      return {
+        ok: true,
+        value: { mode, operator: createApproveAllOperator(), registry: undefined },
+      };
+    case 'console': {
+      const registry = new LiveRegistry();
+      return { ok: true, value: { mode, operator: createConsoleOperator(registry), registry } };
+    }
     case 'tty':
       if (!interactive) {
         return {
           ok: false,
-          error: '--operator tty needs an interactive terminal; use --operator none or approve-all',
+          error:
+            '--operator tty needs an interactive terminal; use --operator console, approve-all or none',
         };
       }
-      return { ok: true, value: { mode, operator: createTerminalOperator() } };
+      return { ok: true, value: { mode, operator: createTerminalOperator(), registry: undefined } };
   }
 }
 
-function describeValue(v: { text: string } | { param: string }): string {
-  return 'param' in v ? `{${v.param}}` : JSON.stringify(v.text);
-}
-
-export function describeAction(action: Action): string {
-  switch (action.kind) {
-    case 'type':
-    case 'select':
-      return `${action.kind} ${describeValue(action.value)}`;
-    case 'navigate':
-      return `navigate ${describeValue(action.url)}`;
-    case 'press':
-      return `press ${action.key}`;
-    case 'extract':
-      return `extract ${action.name}`;
-    default:
-      return action.kind;
-  }
-}
-
-export function renderConfirmRequest(req: ConfirmRequest): string {
+export function renderEscalation(e: Escalation): string {
+  const subject = e.capability ? `${e.capability.id} v${e.capability.version}` : (e.goal ?? '');
   return [
     '',
-    `── operator confirmation required · ${req.cause} ──`,
-    `  run ${req.runId} (${req.phase}) · step ${req.stepId} · ${req.intent}`,
-    `  action: ${describeAction(req.action)}${req.target ? ` on ${req.target}` : ''}`,
-    `  rule: ${req.rule}`,
-    `  ${req.reason}`,
-    ...(req.screenshot ? [`  screenshot: ${req.screenshot}`] : []),
+    `── escalation ${e.id} · ${e.cause} ──`,
+    `  run ${e.runId} (${e.phase}) · ${subject}`,
+    `  at ${e.atStep ?? 'run'}${e.stepIntent ? ` · ${e.stepIntent}` : ''}`,
+    `  ${e.detail}`,
+    `  screenshot: ${e.screenshot}`,
     '',
   ].join('\n');
 }
 
-/** Asks on stderr, reads one line from stdin. Anything but y/yes is a denial. */
+const LABELS: Record<HandBackKind, string> = {
+  approve_step: '[a]pprove the step and let automation run it',
+  resume: '[r]esume automation from wherever you left the page',
+  mark_complete: '[m]ark the goal complete and let automation read the result',
+  abort: 'a[b]ort the run',
+};
+const KEYS: Record<string, HandBackKind> = {
+  a: 'approve_step',
+  r: 'resume',
+  m: 'mark_complete',
+  b: 'abort',
+};
+
+/**
+ * Asks on stderr, reads from stdin. Before a claim the choices are the suggested actions plus
+ * `c` to claim; after a claim the person works in the browser window and then hands back.
+ */
 export function createTerminalOperator(
   io: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream } = {
     input: process.stdin,
     output: process.stderr,
   },
 ): Operator {
+  const id = 'terminal';
   return {
-    info: () => ({ id: 'terminal' }),
-    async confirm(req) {
+    info: () => ({ id }),
+    async escalate(escalation, controls: EscalationControls) {
       const rl = createInterface({ input: io.input, output: io.output });
       try {
-        io.output.write(renderConfirmRequest(req));
-        const answer = await rl.question('  approve this step? [y/N] ');
-        return /^y(es)?$/i.test(answer.trim()) ? 'approved' : 'denied';
+        io.output.write(renderEscalation(escalation));
+        const offered = escalation.suggestedActions;
+        const menu = (claimed: boolean) =>
+          [
+            ...(claimed ? [] : ['  [c]laim and work in the browser window']),
+            ...offered
+              .filter((k) => claimed || k !== 'resume' || true)
+              .map((k) => `  ${LABELS[k]}`),
+            '',
+          ].join('\n');
+        let claimed = false;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          io.output.write(menu(claimed));
+          const answer = (await rl.question('  your choice: ')).trim().toLowerCase();
+          if (!claimed && answer === 'c') {
+            await controls.claim(id);
+            claimed = true;
+            io.output.write(
+              '\n  You have control. Every click, change and Enter in the browser is recorded. When you are done, hand back:\n',
+            );
+            continue;
+          }
+          const kind = KEYS[answer];
+          if (kind && offered.includes(kind)) {
+            await controls.handBack(kind, id);
+            return;
+          }
+          io.output.write('  not one of the choices\n');
+        }
+        io.output.write('  no valid choice; aborting\n');
+        await controls.handBack('abort', id);
       } finally {
         rl.close();
       }
@@ -99,12 +137,17 @@ export function createTerminalOperator(
   };
 }
 
+/** Approves every CONFIRM_REQUIRED escalation and aborts any other cause. */
 export function createApproveAllOperator(log?: (line: string) => void): Operator {
+  const id = 'cli:approve-all';
   return {
-    info: () => ({ id: 'cli:approve-all' }),
-    async confirm(req) {
-      log?.(`approve-all: ${req.cause} at ${req.stepId} (${req.reason}) → approved`);
-      return 'approved';
+    info: () => ({ id }),
+    async escalate(escalation, controls) {
+      const kind: HandBackKind = escalation.suggestedActions.includes('approve_step')
+        ? 'approve_step'
+        : 'abort';
+      log?.(`approve-all: ${escalation.cause} at ${escalation.atStep} → ${kind}`);
+      await controls.handBack(kind, id);
     },
   };
 }
