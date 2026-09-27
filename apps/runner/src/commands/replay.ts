@@ -1,8 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { createFsStore, ReplayArgumentError, type ReplayResult, replay } from '@handsoff/core';
+import {
+  createFsStore,
+  createRecoveryPlanner,
+  type RecoveryPlanner,
+  ReplayArgumentError,
+  type ReplayResult,
+  replay,
+} from '@handsoff/core';
 import { createPlaywrightSurface } from '@handsoff/surface-playwright';
 import { startLiveApi } from './live.js';
 import { resolveOperator } from './operator.js';
+import { createPlannerFromEnv } from './planner.js';
 import { requirePolicy } from './policy.js';
 
 export interface ReplayCommandOptions {
@@ -13,6 +21,9 @@ export interface ReplayCommandOptions {
   baseUrl?: string | undefined;
   headless?: boolean | undefined;
   operator?: string | undefined;
+  variant?: string | undefined;
+  /** Enables policy.assistedFallback for this run. */
+  assisted?: boolean | undefined;
   dataDir?: string | undefined;
 }
 
@@ -106,7 +117,22 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
     console.error(loaded.error);
     return 2;
   }
-  const { policy } = loaded;
+  const policy = opts.assisted
+    ? { ...loaded.policy, assistedFallback: { ...loaded.policy.assistedFallback, enabled: true } }
+    : loaded.policy;
+  // The only model on the replay path (01 §15): one bounded proposal, behind the policy switch.
+  let recoveryPlanner: RecoveryPlanner | undefined;
+  if (policy.assistedFallback.enabled) {
+    const planner = createPlannerFromEnv({ env, log: (line) => console.error(`  ${line}`) });
+    if (!planner.ok) {
+      console.error(`assisted fallback is enabled but no planner is available: ${planner.error}`);
+      return 2;
+    }
+    recoveryPlanner = createRecoveryPlanner(planner.planner);
+    console.error(
+      `assisted fallback: ${planner.provider} · ${planner.planner.info().model} · at most ${policy.assistedFallback.maxPerRun} proposal(s) per run`,
+    );
+  }
   const picked = resolveOperator(opts.operator, env, process.stdin.isTTY === true);
   if (!picked.ok) {
     console.error(picked.error);
@@ -137,10 +163,19 @@ export async function runReplayCommand(opts: ReplayCommandOptions): Promise<numb
         params,
         baseUrl,
         policy,
+        variantId: opts.variant,
         stepTimeoutMs: intEnv('HANDSOFF_STEP_TIMEOUT_MS'),
         runTimeoutMs: intEnv('HANDSOFF_RUN_TIMEOUT_MS'),
       },
-      { surface, store, profile, env, operator, log: (line) => console.error(`  ${line}`) },
+      {
+        surface,
+        store,
+        profile,
+        env,
+        operator,
+        recoveryPlanner,
+        log: (line) => console.error(`  ${line}`),
+      },
     );
   } catch (err) {
     if (err instanceof ReplayArgumentError) {

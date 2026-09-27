@@ -33,6 +33,7 @@ export const CHAOS_MODES = [
   'interstitial',
   'slow',
   'error',
+  'relabel',
 ] as const;
 export type ChaosMode = (typeof CHAOS_MODES)[number];
 const CHAOS_COOKIE = 'coreteller_chaos';
@@ -50,6 +51,8 @@ function cookieValue(req: Request, name: string): string | undefined {
 interface Chaos {
   /** True once per browser for an armed mode; false afterwards or when the mode is not armed. */
   fire(mode: ChaosMode): boolean;
+  /** True while the mode is armed, every time: for injected drift rather than one-off events. */
+  armed(mode: ChaosMode): boolean;
 }
 
 /**
@@ -69,6 +72,7 @@ function chaosFor(req: Request, res: Response, allow: boolean): Chaos {
   );
   const fired = new Set((cookieValue(req, CHAOS_COOKIE) ?? '').split(',').filter(Boolean));
   return {
+    armed: (mode) => armed.has(mode),
     fire(mode) {
       if (!armed.has(mode) || fired.has(mode)) return false;
       fired.add(mode);
@@ -90,6 +94,7 @@ export function createApp(config: AppConfig, bank: Bank = createBank()): express
   app.locals.product = variant.product;
   app.locals.productVersion = variant.productVersion;
   app.locals.mainFrameName = variant.mainFrameName;
+  app.locals.accountColumns = variant.accountColumns;
   app.locals.theme = variant.theme;
   app.locals.labels = labels;
   app.locals.formatMoney = formatMoney;
@@ -171,8 +176,12 @@ export function createApp(config: AppConfig, bank: Bank = createBank()): express
 
   // ---- members ------------------------------------------------------------------------------
 
-  app.get('/members', auth, (_req, res) => {
-    res.render('member-lookup', { pageTitle: labels.memberLookup, mno: '' });
+  app.get('/members', auth, (req, res) => {
+    // Injected drift: the search button is relabelled and moved to its own row, so neither the
+    // recorded name nor the recorded position of the control survives (P7 assisted fallback).
+    // Drift does not go away after one request, so this one stays on while the header is armed.
+    const relabel = chaos(req, res).armed('relabel');
+    res.render('member-lookup', { pageTitle: labels.memberLookup, mno: '', relabel });
   });
 
   // The search is where most injected conditions land: it is the first request of every flow.

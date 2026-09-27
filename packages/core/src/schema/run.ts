@@ -227,6 +227,23 @@ export const RunEventSchema = z.discriminatedUnion('type', [
     recovery: RecoverySchema,
     budgetRemaining: z.number().int().nonnegative(),
   }),
+  /** The variant fingerprinted after bootstrap and the overrides applied for it (D-037). */
+  z.strictObject({
+    ...eventBase,
+    type: z.literal('variant'),
+    requested: KebabIdSchema.optional(),
+    matched: z.array(KebabIdSchema),
+    variantId: KebabIdSchema.optional(),
+    overrides: z
+      .strictObject({
+        labels: z.number().int().nonnegative(),
+        routes: z.number().int().nonnegative(),
+        frames: z.number().int().nonnegative(),
+        steps: z.number().int().nonnegative(),
+        detectors: z.number().int().nonnegative(),
+      })
+      .optional(),
+  }),
   z.strictObject({
     ...eventBase,
     type: z.literal('drift'),

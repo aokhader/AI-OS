@@ -312,6 +312,7 @@ type RunEvent = { at: string; runId: string; stepId?: string; actor: Actor } & (
   | { type: 'action';           action: Action; resolvedBy?: number; candidateCount?: number; durationMs: number }
   | { type: 'condition';        conditionId: string; role: ConditionRole; class?: ConditionClass; matched: boolean; code?: string }
   | { type: 'recovery';         recovery: Recovery; budgetRemaining: number }
+  | { type: 'variant';          requested?: string; matched: string[]; variantId?: string; overrides?: { labels: number; routes: number; frames: number; steps: number; detectors: number } }
   | { type: 'drift';            baseline: Step['baseline']; observed: { resolvedBy: number; candidateCount: number }; fingerprintMismatch?: boolean }
   | { type: 'control_transfer'; from: ControlOwner; to: ControlOwner; operatorId?: string; cause?: EscalationCause }
   | { type: 'human_action';     step: RecordedStep }
@@ -420,13 +421,14 @@ interface Variant {
 interface Fingerprint { titleIncludes?: string; textPresent?: string[]; versionBanner?: string; urlPattern?: string }
 
 interface ProfileVariantOverrides {
-  labels?: Record<string, string>;     // applied to role.name and anchored.anchor/column
-  routes?: Record<string, string>;
+  labels?: Record<string, string>;     // role.name, anchored.anchor/column, whole-string textPresent/textAbsent
+  routes?: Record<string, string>;     // route pattern → route pattern: entry, navigate URLs, url predicates
+  frames?: Record<string, string>;     // frame name → frame name, every framePath segment (D-037)
   detectors?: Condition[];
 }
 ```
 
-Override application order at replay: profile variant `labels` and `routes` first, then the capability's own `variants[variantId].steps` and `detectors`.
+Override application order at replay (`applyVariant` in core, pure, result validated): profile variant `labels`, `routes` and `frames` first, then the capability's own `variants[variantId].steps` and `detectors`. The variant is fingerprinted once the entry page is open; the `variant` run event records the request, the matches, the choice and the override counts.
 
 ### Policy
 
@@ -458,7 +460,7 @@ This document defines data. Behaviour lives behind the six port interfaces in [0
 |---|---|---|
 | `Surface` | `@handsoff/surface-playwright` | observe, act on a ref, `captureHumanActions` (an injected page script reports clicks, changes and Enter-key submits while a listener is attached), close. Resolution is `resolveTarget()` in core, not a surface method |
 | `Planner` | `@handsoff/llm-anthropic`, `@handsoff/llm-openai`; `ScriptedPlanner` in core for tests; all over the planner protocol in core | one `Decision` per observation during discovery |
-| `RecoveryPlanner` | a planner package, optional | at most one proposed `Action` for a failed replay step |
+| `RecoveryPlanner` | core, `createRecoveryPlanner(planner)` over any `Planner`; `createScriptedRecoveryPlanner` for tests | at most one proposed `Action` for a failed replay step, behind `policy.assistedFallback` (D-038); its transcript is persisted as `transcript.assisted.jsonl` |
 | `Store` | filesystem implementation in core (`createFsStore`) | capabilities, runs (a `RunHandle` appends events and writes screenshots, snapshots and the result), escalations, app profiles; everything read from disk is validated with its zod schema |
 | `PolicyGate` | core (`checkPolicy`, a pure function) | `Verdict`, live risk and mismatch for every action before it executes, in both engines |
 | `Operator` | `handsoff` CLI: terminal, approve-all, or the console over the live API the run's process serves (`--operator console`) | receives every escalation with its controls: claim, hand back (`approve_step`, `resume`, `mark_complete`, `abort`), human-action feed; absent, the escalation is abandoned at once |
@@ -609,6 +611,7 @@ Points a reviewer should be able to check from this file alone: what the capabil
         steps/001-before.png, 001-after.png, ...
         escalation.json                 only if escalated
         transcript.redacted.jsonl       discovery only
+        transcript.assisted.jsonl       replay with assisted fallback only
         result.json
   config/
     policy.json
@@ -621,7 +624,8 @@ Points a reviewer should be able to check from this file alone: what the capabil
     replay-confirm-required/
     discovery-policy-blocked/
     replay-escalation-handoff/
-    replay-variant-b/
+    replay-variant-b/                   the A-recorded capability on variant B
+    replay-assisted-fallback/           one model proposal standing in for a step whose target is gone
     capability.get-member-savings-balance.v1.json
   .env                                  git-ignored
   .env.example                          committed
@@ -653,6 +657,6 @@ Points a reviewer should be able to check from this file alone: what the capabil
 | `LEGACY_BANK_SESSION_TTL_MS` | `1800000` | mock app; chaos sets it low |
 | `LEGACY_BANK_ALLOW_CHAOS_HEADER` | `true` in dev | mock app honours `x-handsoff-chaos` |
 
-Chaos injection ([D-024](08-decision-log.md#d-024--chaos-modes-four-required-two-optional)): `handsoff replay --chaos <mode>[,<mode>]` sets an `x-handsoff-chaos` header on the browser context. The mock app honours it only when `LEGACY_BANK_ALLOW_CHAOS_HEADER` is true. Each mode fires once per browser, on the request it targets, and is then remembered in a cookie of its own (so it stays fired after the session cookie is cleared), which is what lets a recovery be observed succeeding. The member search is the target of most modes because it is the first request of every flow: `not-found` (the next search finds nobody), `session-expiry` (the next search clears the session and bounces to sign-in with the notice), `interstitial` (the next results page opens a native "System notice" `alert()`), `slow` (the next search shows a "system is busy" page that refreshes to the results after 2 s), `error` (the next search is a 500 application-error page). `validation` targets the sub-account form: the next otherwise valid submit is rejected with a legacy edit rule. Several modes can be armed at once; one fires per request.
+Chaos injection ([D-024](08-decision-log.md#d-024--chaos-modes-four-required-two-optional)): `handsoff replay --chaos <mode>[,<mode>]` sets an `x-handsoff-chaos` header on the browser context. The mock app honours it only when `LEGACY_BANK_ALLOW_CHAOS_HEADER` is true. Each mode fires once per browser, on the request it targets, and is then remembered in a cookie of its own (so it stays fired after the session cookie is cleared), which is what lets a recovery be observed succeeding. The member search is the target of most modes because it is the first request of every flow: `not-found` (the next search finds nobody), `session-expiry` (the next search clears the session and bounces to sign-in with the notice), `interstitial` (the next results page opens a native "System notice" `alert()`), `slow` (the next search shows a "system is busy" page that refreshes to the results after 2 s), `error` (the next search is a 500 application-error page). `validation` targets the sub-account form: the next otherwise valid submit is rejected with a legacy edit rule. `relabel` targets the lookup page and, being drift rather than an event, stays on for as long as the header is armed: the search button is renamed "Look up member" and moved to its own row, so neither the recorded name nor the recorded position finds it (the assisted-fallback demonstration, P7). Several modes can be armed at once; one fires per request.
 
 Running without live services: replay needs no API key and no network. Discovery tests use `ScriptedPlanner`, which replays a saved decision list from `packages/core/test/fixtures/` against the mock app.

@@ -531,8 +531,9 @@ interface Variant {
 }
 
 interface Overrides {                   // product-wide, lives on the App Profile
-  labels?: Record<string, string>;      // "Search" → "Find"; applied to role names and anchors
-  routes?: Record<string, string>;      // "/members/:id" → "/member/view/:id"
+  labels?: Record<string, string>;      // "Search" → "Find"; role names, anchors, columns, whole-string text predicates
+  routes?: Record<string, string>;      // "/members/:id" → "/member/view/:id"; entry route, navigate URLs, url predicates
+  frames?: Record<string, string>;      // "main" → "content"; every framePath segment
   detectors?: Condition[];              // extra variant-specific conditions
 }
 
@@ -540,15 +541,15 @@ interface Overrides {                   // product-wide, lives on the App Profil
 // Capability.variants[variantId].steps[stepId] → replacement target, postcondition or preconditions
 ```
 
-A capability binds to a `vendorProductId`, never to a tenant. At session start the runner fingerprints the variant; if it matches, overrides are applied to the capability in memory before replay, profile-level first (label maps rewrite `role.name` and `anchored.anchor`; route rewrites apply to `navigate` values and URL predicates), then the capability's own per-step overrides for that variant (which replace targets wholesale). An unknown fingerprint is reported as `DRIFT_SUSPECTED` or escalated, never silently attempted against the base variant.
+A capability binds to a `vendorProductId`, never to a tenant. Once the entry page is open, right after bootstrap, the runner fingerprints the session: every variant's fingerprint is evaluated against that observation, a requested `--variant` must be among the matches, and without a request exactly one match selects the variant ([D-037](08-decision-log.md#d-037--variant-detection-by-fingerprint-after-bootstrap-overrides-rewrite-the-capability-in-memory-frames-included)). Overrides are then applied to the capability in memory, profile-level first (label maps rewrite `role.name`, `anchored.anchor`, `anchored.column` and whole-string text predicates; route rewrites apply to the entry route, `navigate` values and URL predicates; frame maps rewrite every `framePath`), then the capability's own per-step overrides for that variant, which replace targets, postconditions or preconditions wholesale; the rewritten artifact is validated before it runs, and the `variant` event records what was applied. An unknown page, two variants that both match, or a request the page contradicts is `DRIFT_SUSPECTED` before any step runs (and escalates like any failure when an operator is attached), never silently attempted against the base variant.
 
 **Drift** is measured, not guessed: `resolvedBy` and `candidateCount` per step against the discovery baseline; fingerprint mismatch; and, at real scale, per-variant replay history feeding a stability score that gates `approved`. Route canonicalisation at compile time (`/members/10001` → `/members/:memberId`) is the smallest piece of this and is built.
 
-The mock app's variant B (different branding, relabelled buttons, reordered columns) exercises exactly this path with a label map and one or two step overrides.
+The mock app's variant B (different branding, relabelled buttons, a renamed main frame, reordered account columns) exercises exactly this path with a label map and a frame map; the `same-row-column` anchor is what carries the balance across the column reorder, and the structural fallback is what it breaks. `evidence/replay-variant-b/` shows the A-recorded capability resolving every step by its first strategy on B.
 
 ## 15. Assisted fallback
 
-Designed fully; built only if time remains in P7 ([D-008](08-decision-log.md#d-008--stretch-goals-variant-b-built-assisted-fallback-designed-built-if-time)).
+Designed in P0 ([D-008](08-decision-log.md#d-008--stretch-goals-variant-b-built-assisted-fallback-designed-built-if-time)) and built in P7 as the discovery `Planner` asked for one turn ([D-038](08-decision-log.md#d-038--assisted-fallback-is-the-discovery-planner-asked-for-one-turn-proposals-never-run-risky-actions)): the runner enables it with `replay --assisted` (or `policy.assistedFallback.enabled`), the proposal must target an element of the page it was shown, passes the policy gate with the step's recorded risk and is refused when anything but `allow` and `safe` comes back, and the step's report is marked `drift`. `evidence/replay-assisted-fallback/` shows a real model proposing the relabelled search button under the mock app's `relabel` chaos.
 
 When the classifier returns `fail` with `TARGET_NOT_FOUND` or `CHECKPOINT_FAILED`, and `policy.assistedFallback.enabled` is true, and a `RecoveryPlanner` was injected, and the per-run budget is not exhausted: the engine calls `proposeOne` with the current observation, the failed step's intent and target, and the expected postcondition. The planner returns **exactly one** action or `null`. The action passes the policy gate, executes, and the postcondition is re-verified. The whole thing is recorded as `recovery { kind: 'assisted', proposal, verdict, outcome }`. If it fails, the original `fail` stands. Never more than one model call per step, never more than `maxPerRun` per run, never open-ended.
 

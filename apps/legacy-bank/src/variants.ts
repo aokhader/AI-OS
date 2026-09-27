@@ -1,8 +1,10 @@
 /**
  * Two fictional institutions running the same fictional vendor product, configured differently.
  * This is the stand-in for brief §3.7's "many tenants run the same underlying vendor product".
- * Variant B relabels controls and renames the main frame; column reordering lands in P7.
+ * Variant B relabels controls, renames the main frame and orders the accounts table differently.
  */
+export type AccountColumn = 'type' | 'number' | 'balance' | 'opened';
+
 export interface VariantConfig {
   id: 'first-example-cu' | 'sample-federal-cu';
   institution: string;
@@ -10,6 +12,8 @@ export interface VariantConfig {
   productVersion: string;
   mainFrameName: string;
   theme: { headerBg: string; pageBg: string };
+  /** Column order of the accounts table on the member detail page. */
+  accountColumns: AccountColumn[];
   labels: {
     userId: string;
     password: string;
@@ -41,6 +45,7 @@ export const variants: Record<VariantKey, VariantConfig> = {
     productVersion: '7.4.2',
     mainFrameName: 'main',
     theme: { headerBg: '#1f3b64', pageBg: '#e8ecf0' },
+    accountColumns: ['type', 'number', 'balance', 'opened'],
     labels: {
       userId: 'User ID',
       password: 'Password',
@@ -68,6 +73,7 @@ export const variants: Record<VariantKey, VariantConfig> = {
     productVersion: '7.6.0',
     mainFrameName: 'content',
     theme: { headerBg: '#5a1f1f', pageBg: '#f2ede4' },
+    accountColumns: ['type', 'balance', 'number', 'opened'],
     labels: {
       userId: 'User ID',
       password: 'Password',

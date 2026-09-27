@@ -61,4 +61,6 @@ export interface RecoveryContext {
 export interface RecoveryPlanner {
   info(): PlannerInfo;
   proposeOne(context: RecoveryContext): Promise<Action | null>;
+  /** Persisted by the engine as transcript.assisted.jsonl when present. */
+  transcript?(): TranscriptEntry[];
 }

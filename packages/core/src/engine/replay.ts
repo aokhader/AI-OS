@@ -13,6 +13,7 @@ import type {
   Run,
 } from '../schema/index.js';
 import { newRunId } from '../store/run-id.js';
+import { applyVariant, detectVariants } from '../variants/apply.js';
 import {
   credentialsFromEnv,
   EngineArgumentError,
@@ -79,7 +80,12 @@ export async function replay(options: ReplayOptions, deps: ReplayDeps): Promise<
 
 class ReplayEngine extends EngineBase {
   protected override readonly phase = 'replay';
-  private readonly detectors: Condition[];
+  private detectors: Condition[];
+  /** The capability as it runs: the artifact, rewritten for the detected variant (D-037). */
+  private capability: Capability;
+  private variantId: string | undefined;
+  private variantResolved = false;
+  private runTarget: Run['target'] | undefined;
 
   constructor(
     private readonly options: ReplayOptions,
@@ -87,6 +93,8 @@ class ReplayEngine extends EngineBase {
     credentials: ParamValues,
   ) {
     super(deps, options.baseUrl, options, credentials);
+    this.capability = options.capability;
+    this.variantId = options.variantId;
     this.approved = options.capability.status === 'approved';
     this.detectors = [
       ...RUNTIME_DETECTORS,
@@ -101,12 +109,13 @@ class ReplayEngine extends EngineBase {
   }
 
   protected override escalationSubject(): { capability: CapabilityRef } {
-    const { capability } = this.options;
+    const capability = this.capability;
     return { capability: { id: capability.id, version: capability.version } };
   }
 
   async execute(): Promise<ReplayResult> {
-    const { capability, params, baseUrl, variantId } = this.options;
+    const { params, baseUrl, variantId } = this.options;
+    const capability = this.capability;
     const startedAt = this.now();
     const run: Run = {
       id: newRunId(startedAt),
@@ -121,6 +130,7 @@ class ReplayEngine extends EngineBase {
       controlOwner: 'automation',
       sideEffects: 'none',
     };
+    this.runTarget = run.target;
     this.run = await this.deps.store.runs.create(redactJson(run, this.sensitive));
     this.log(`run ${run.id} started in ${this.run.dir}`);
 
@@ -153,6 +163,16 @@ class ReplayEngine extends EngineBase {
         : result,
       this.sensitive,
     );
+    const assisted = this.deps.recoveryPlanner?.transcript?.() ?? [];
+    if (assisted.length > 0) {
+      await this.run.putText(
+        'transcript.assisted.jsonl',
+        assisted
+          .map((e) => JSON.stringify(redactJson(e, this.sensitive)))
+          .join('\n')
+          .concat('\n'),
+      );
+    }
     await this.event({ type: 'result', actor: 'automation', result: persisted });
     await this.run.update({
       finishedAt: this.now().toISOString(),
@@ -216,7 +236,7 @@ class ReplayEngine extends EngineBase {
           : undefined;
     if (!cause) return undefined;
     const stepId = stop.atStep ?? 'run';
-    const step = this.options.capability.steps.find((s) => s.id === stepId);
+    const step = this.capability.steps.find((s) => s.id === stepId);
     return this.escalate({
       cause,
       detail: `${stop.reason.failure}: expected ${stop.reason.expected}; observed ${stop.reason.observed}`,
@@ -227,10 +247,12 @@ class ReplayEngine extends EngineBase {
   }
 
   private async enter(): Promise<void> {
-    const { capability, params } = this.options;
+    const { params } = this.options;
+    const capability = this.capability;
     this.currentStep = 'entry';
     await this.navigate(substituteRoute(capability.entry.route, params), 'entry');
-    for (const pre of capability.entry.preconditions) {
+    await this.resolveVariant('entry');
+    for (const pre of this.capability.entry.preconditions) {
       const w = await this.waitFor(
         pre,
         pre.when.timeoutMs ?? this.stepTimeoutMs,
@@ -256,9 +278,86 @@ class ReplayEngine extends EngineBase {
     }
   }
 
+  /**
+   * Fingerprints the session once the entry page is open (01 §14, D-037): the requested variant
+   * must match, or exactly one variant must, and the capability is rewritten for it before any
+   * step runs. Anything else is DRIFT_SUSPECTED: a capability is never silently attempted against
+   * the wrong tenant.
+   */
+  private async resolveVariant(stepId: string): Promise<void> {
+    if (this.variantResolved) return;
+    this.variantResolved = true;
+    const profile = this.deps.profile;
+    const known = Object.keys(profile.variants);
+    if (known.length === 0) return;
+    const obs = await this.observe('variant', stepId);
+    const matched = detectVariants(profile, obs);
+    const requested = this.options.variantId;
+    let chosen: string | undefined;
+    let problem: string | undefined;
+    if (requested !== undefined) {
+      if (matched.includes(requested)) chosen = requested;
+      else {
+        problem = `variant ${requested} was requested but the page matches ${matched.length > 0 ? matched.join(', ') : 'no known variant'}`;
+      }
+    } else if (matched.length === 1) {
+      chosen = matched[0];
+    } else {
+      problem =
+        matched.length === 0
+          ? `the page matches no known variant (${known.join(', ')})`
+          : `the page matches several variants (${matched.join(', ')}); pass --variant`;
+    }
+    if (chosen === undefined) {
+      await this.event({
+        type: 'variant',
+        actor: 'automation',
+        stepId,
+        ...(requested !== undefined ? { requested } : {}),
+        matched,
+      });
+      await this.snapshot(stepId, obs);
+      throw new Stop(
+        {
+          kind: 'failure',
+          failure: 'DRIFT_SUSPECTED',
+          expected: `a known variant fingerprint${requested !== undefined ? ` (${requested})` : ''}`,
+          observed: `${problem}; page title "${obs.title}"`,
+        },
+        stepId,
+      );
+    }
+    const before = this.capability.entry.route;
+    const applied = applyVariant(this.capability, profile, chosen);
+    this.capability = applied.capability;
+    this.variantId = chosen;
+    this.detectors = [...RUNTIME_DETECTORS, ...profile.detectors, ...this.capability.detectors];
+    await this.event({
+      type: 'variant',
+      actor: 'automation',
+      stepId,
+      ...(requested !== undefined ? { requested } : {}),
+      matched,
+      variantId: chosen,
+      overrides: applied.counts,
+    });
+    if (this.runTarget) await this.run.update({ target: { ...this.runTarget, variantId: chosen } });
+    const c = applied.counts;
+    this.log(
+      `variant ${chosen}${requested === undefined ? ' (detected)' : ''}: ${c.labels} label, ${c.routes} route, ${c.frames} frame, ${c.steps} step and ${c.detectors} detector override(s) applied`,
+    );
+    if (this.capability.entry.route !== before) {
+      await this.navigate(
+        substituteRoute(this.capability.entry.route, this.options.params),
+        stepId,
+      );
+    }
+  }
+
   /** The compiled steps from `start`, the success condition and the outputs. */
   private async flow(start: number): Promise<Record<string, unknown>> {
-    const { capability, params } = this.options;
+    const { params } = this.options;
+    const capability = this.capability;
     for (const step of capability.steps.slice(start)) {
       this.checkRunTimeout();
       await this.runStep(step, params, this.detectors, false);
@@ -298,7 +397,7 @@ class ReplayEngine extends EngineBase {
    * observation, and a skipped risky step counts as committed.
    */
   private async resumeFrom(stepId: string): Promise<number> {
-    const { capability } = this.options;
+    const capability = this.capability;
     const steps = capability.steps;
     const obs = await this.observe('resume', stepId);
     const found = steps.findIndex((s) => s.id === stepId);
@@ -339,7 +438,7 @@ class ReplayEngine extends EngineBase {
    * re-extract every output from it. The operator never types a result.
    */
   private async completeByHuman(): Promise<Record<string, unknown>> {
-    const { capability } = this.options;
+    const capability = this.capability;
     this.currentStep = 'success';
     const w = await this.waitFor(capability.success, this.stepTimeoutMs, 'success', this.detectors);
     if (w.verdict) {
@@ -370,7 +469,7 @@ class ReplayEngine extends EngineBase {
 
   private async extractOutputsAt(stepId: string): Promise<void> {
     const obs = this.lastObservation;
-    for (const spec of this.options.capability.outputs) {
+    for (const spec of this.capability.outputs) {
       if (spec.atStep !== stepId || this.rawOutputs.has(spec.name) || !obs) continue;
       const raw = this.readOutput(spec, obs, stepId);
       if (raw !== undefined) this.rawOutputs.set(spec.name, raw);
@@ -383,8 +482,8 @@ class ReplayEngine extends EngineBase {
     stepId: string,
   ): string | undefined {
     if ('urlParam' in spec.source) {
-      const step = this.options.capability.steps.find((s) => s.id === stepId);
-      const patterns = [step?.postcondition.when.url, this.options.capability.success.when.url];
+      const step = this.capability.steps.find((s) => s.id === stepId);
+      const patterns = [step?.postcondition.when.url, this.capability.success.when.url];
       for (const pattern of patterns) {
         if (!pattern) continue;
         const m = matchUrl(pattern, obs);
@@ -399,7 +498,7 @@ class ReplayEngine extends EngineBase {
 
   private finalizeOutputs(obs: SurfaceObservation): Record<string, unknown> {
     const outputs: Record<string, unknown> = {};
-    for (const spec of this.options.capability.outputs) {
+    for (const spec of this.capability.outputs) {
       const raw = this.rawOutputs.get(spec.name) ?? this.readOutput(spec, obs, 'success');
       const parsed = raw === undefined ? undefined : parseOutput(raw, spec);
       if (parsed === undefined) {
@@ -468,7 +567,8 @@ class ReplayEngine extends EngineBase {
       | { status: 'failure'; kind: FailureKind; expected: string; observed: string },
     atStep: string | undefined,
   ): ReplayResult {
-    const { capability, variantId } = this.options;
+    const capability = this.capability;
+    const variantId = this.variantId;
     const escalation = this.escalationBlock();
     return {
       ...head,

@@ -21,7 +21,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "schema:export": "pnpm --filter @handsoff/core schema:export",
-    "demo:handoff": "tsx apps/runner/scripts/handoff-demo.ts"
+    "demo:handoff": "tsx apps/runner/scripts/handoff-demo.ts",
+    "dev:b": "pnpm --filter @handsoff/legacy-bank exec tsx watch src/main.ts --variant b"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

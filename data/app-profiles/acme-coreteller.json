@@ -188,7 +188,13 @@
       "name": "Sample Federal Credit Union",
       "fingerprint": { "titleIncludes": "Sample Federal Credit Union" },
       "overrides": {
-        "labels": { "Member #": "Member Number", "Search": "Find", "View": "Open" }
+        "labels": {
+          "Member #": "Member Number",
+          "Search": "Find",
+          "View": "Open",
+          "Action": "Actions"
+        },
+        "frames": { "main": "content" }
       }
     }
   }

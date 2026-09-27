@@ -20,9 +20,12 @@ export type Fingerprint = z.infer<typeof FingerprintSchema>;
 
 /** Product-wide overrides for one variant. Capability-specific step overrides live on the capability. */
 export const ProfileVariantOverridesSchema = z.strictObject({
-  /** Applied to role.name and anchored.anchor / column. */
+  /** Applied to role.name, anchored.anchor / column and whole-string text predicates (D-037). */
   labels: z.record(z.string().min(1), z.string().min(1)).optional(),
+  /** Route pattern → route pattern: entry route, navigate URLs and url predicates. */
   routes: z.record(z.string().min(1), z.string().min(1)).optional(),
+  /** Frame name → frame name, applied to every framePath segment. */
+  frames: z.record(z.string().min(1), z.string().min(1)).optional(),
   detectors: z.array(ConditionSchema).optional(),
 });
 export type ProfileVariantOverrides = z.infer<typeof ProfileVariantOverridesSchema>;

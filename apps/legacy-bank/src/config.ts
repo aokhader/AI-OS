@@ -19,8 +19,20 @@ function intEnv(name: string, fallback: number): number {
   return n;
 }
 
-export function configFromEnv(): AppConfig & { port: number } {
-  const key = (process.env.LEGACY_BANK_VARIANT ?? 'a').toLowerCase() as VariantKey;
+/** `--variant b` on the command line beats LEGACY_BANK_VARIANT; pnpm scripts cannot set env vars portably. */
+function variantArg(argv: string[]): string | undefined {
+  const i = argv.indexOf('--variant');
+  return i >= 0 ? argv[i + 1] : undefined;
+}
+
+export function configFromEnv(
+  argv: string[] = process.argv.slice(2),
+): AppConfig & { port: number } {
+  const key = (
+    variantArg(argv) ??
+    process.env.LEGACY_BANK_VARIANT ??
+    'a'
+  ).toLowerCase() as VariantKey;
   const variant = variants[key];
   if (!variant) throw new Error(`LEGACY_BANK_VARIANT must be a or b, got ${key}`);
   const port =

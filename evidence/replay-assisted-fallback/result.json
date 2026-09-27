@@ -1,0 +1,65 @@
+{
+  "status": "success",
+  "outputs": {
+    "savingsBalance": "«savingsBalance#sha256:096175fe1de6»"
+  },
+  "capability": {
+    "id": "get-member-savings-balance",
+    "version": 4
+  },
+  "variantId": "first-example-cu",
+  "stepsRun": [
+    {
+      "stepId": "s1",
+      "attempts": 1,
+      "durationMs": 112,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s2",
+      "attempts": 1,
+      "durationMs": 2992,
+      "drift": true
+    },
+    {
+      "stepId": "s3",
+      "attempts": 1,
+      "durationMs": 174,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    },
+    {
+      "stepId": "s4",
+      "attempts": 1,
+      "durationMs": 118,
+      "drift": false,
+      "resolvedBy": 0,
+      "candidateCount": 1
+    }
+  ],
+  "recoveries": [
+    {
+      "stepId": "s2",
+      "conditionId": "s2-post",
+      "routine": {
+        "kind": "assisted"
+      },
+      "attempt": 1,
+      "outcome": "recovered",
+      "proposal": {
+        "kind": "click",
+        "target": {
+          "ref": "e16"
+        }
+      },
+      "at": "2026-09-27T06:41:03.802Z"
+    }
+  ],
+  "sideEffects": "none",
+  "evidence": {
+    "runDir": "D:\\Documents\\GitHub\\AI-OS\\data\\runs\\run_20260926_234058_00c1"
+  }
+}

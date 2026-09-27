@@ -4,7 +4,7 @@ Computer-use automation for legacy banking software. An LLM figures out how to c
 
 Take-home assessment for interface.ai. The brief is at [docs/description.md](docs/description.md). The project's working knowledge base, read at the start of every session, is [docs/context/](docs/context/README.md).
 
-> Status: P0–P6 complete. Deterministic replay works end to end against the mock app; real model-driven discoveries (Gemini via Google AI Studio) compiled `get-member-savings-balance` v4 and the write flow `open-sub-account` v2, whose submit the policy gate classified risky and an operator confirmed at discovery; those runs are in [evidence/discovery-run](evidence/discovery-run) and [evidence/discovery-run-open-sub-account](evidence/discovery-run-open-sub-account). Every runtime condition in the brief is injectable in the mock app and answered by the classifier. Every action passes the policy gate before it executes, off-allowlist navigations are refused at the gate and at the network layer, and nothing persisted shows a sensitive value: screenshots are masked, logs carry hashed placeholders, sensitive outputs are masked in `result.json`. When a run needs a person, it escalates: the console shows why, the person claims it, works in the very browser window automation was driving, and hands back; their actions are recorded as steps and automation continues from the checkpoints. Next: P7 cross-tenant variant. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
+> Status: P0–P7 complete. Deterministic replay works end to end against the mock app; real model-driven discoveries (Gemini via Google AI Studio) compiled `get-member-savings-balance` v4 and the write flow `open-sub-account` v2, whose submit the policy gate classified risky and an operator confirmed at discovery; those runs are in [evidence/discovery-run](evidence/discovery-run) and [evidence/discovery-run-open-sub-account](evidence/discovery-run-open-sub-account). Every runtime condition in the brief is injectable in the mock app and answered by the classifier. Every action passes the policy gate before it executes, off-allowlist navigations are refused at the gate and at the network layer, and nothing persisted shows a sensitive value: screenshots are masked, logs carry hashed placeholders, sensitive outputs are masked in `result.json`. When a run needs a person, it escalates: the console shows why, the person claims it, works in the very browser window automation was driving, and hands back; their actions are recorded as steps and automation continues from the checkpoints. The same capability runs on a second tenant of the mock app through the app profile's overrides, and an unknown tenant is refused as drift. Assisted fallback, the one bounded model call allowed on the replay path, is built and behind a policy switch. Next: P8 submission. The design write-up (`/REPORT.md`) lands in P8. See [docs/context/04-roadmap.md](docs/context/04-roadmap.md).
 
 ## Layout
 
@@ -57,7 +57,15 @@ pnpm handsoff replay --capability get-member-savings-balance --param memberId=10
 pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --chaos error            # failure APP_ERROR at s2 with screenshot and snapshot
 ```
 
-Other modes: `not-found` and `slow` (busy page waited out with wait-retry). Recoveries never change the result status; they are listed in `recoveries` and in the run's event log.
+Other modes: `not-found`, `slow` (busy page waited out with wait-retry) and `relabel` (the search button renamed and moved, so no recorded locator finds it). Recoveries never change the result status; they are listed in `recoveries` and in the run's event log.
+
+`relabel` is where the one model on the replay path comes in. With `--assisted` (or `policy.assistedFallback.enabled`), a step whose target cannot be found, or whose checkpoint does not hold, gets one proposal from the configured model: the proposal must target an element of the page it was shown, passes the same policy gate, is refused if it is risky, and is re-verified against the step's own checkpoint before the run continues. At most `maxPerRun` proposals per run; if it fails, the original failure stands. It needs a provider key like discovery does:
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --chaos relabel --assisted   # success; recoveries: one assisted proposal, step s2 marked drift
+```
+
+Without `--assisted` the same run is `failure TARGET_NOT_FOUND at s2`, and no model is involved. [evidence/replay-assisted-fallback](evidence/replay-assisted-fallback) is that run with a real model, transcript included.
 
 Every action passes the policy gate in [config/policy.json](config/policy.json) before it executes: the action kind, the origin and route of a navigation, and the live risk of the control (button text, form action, route). The second capability, `open-sub-account`, was discovered by a model too and exercises the write path: its submit classified risky, so the artifact carries `risk: risky, confirm: operator` on s7, and every replay pauses there for an operator. In a terminal the CLI asks you (`--operator tty`, the default); unattended, the run stops before the step with nothing committed:
 
@@ -113,6 +121,18 @@ The same discovery without a model, following a script of targets (offline demo,
 pnpm handsoff discover --goal "Look up member {memberId} and return the current balance of the Savings account" --param memberId=10001 --sensitive memberId --id get-member-savings-balance-scripted --outcome "MEMBER_NOT_FOUND=No matching member" --scripted data/discovery-scripts/get-member-savings-balance.json
 ```
 
+One capability, two tenants. Variant B of the mock app is the same vendor product configured by another institution: other branding, `Find` and `Open` instead of `Search` and `View`, `Member Number` instead of `Member #`, a renamed main frame and reordered account columns. Start it on `:4101` and replay the capability recorded on A:
+
+```bash
+pnpm dev:b       # Sample Federal Credit Union on http://localhost:4101
+```
+
+```bash
+pnpm handsoff replay --capability get-member-savings-balance --param memberId=10001 --base-url http://localhost:4101 --variant sample-federal-cu   # success; every step resolves by its first strategy
+```
+
+The app profile ([data/app-profiles/acme-coreteller.json](data/app-profiles/acme-coreteller.json)) carries each variant's fingerprint and overrides (label, route and frame maps, extra detectors); a capability can add per-step replacements for a variant. The runner fingerprints the session once the entry page is open, rewrites the capability in memory, and records what it applied in a `variant` event. Without `--variant` it uses whichever single variant matches; a page that matches none, or a variant the page contradicts, is `DRIFT_SUSPECTED` before any step runs. [evidence/replay-variant-b](evidence/replay-variant-b) is that replay.
+
 Browse runs and capabilities in the console. In one terminal serve the API, in another start the console dev server, then open http://localhost:5173:
 
 ```bash
@@ -128,8 +148,8 @@ Runs show their result, step reports and a timeline with screenshots; capabiliti
 Checks:
 
 ```bash
-pnpm test               # schema, resolver, classifier, compiler, policy gate, redaction, control owner, checkpoint scan, human steps, planner, API and mock-app tests; no browser, no API key
-pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, every chaos mode, the gate at both layers, masking, and every escalation path including the live console API; no API key
+pnpm test               # schema, resolver, classifier, compiler, policy gate, redaction, control owner, checkpoint scan, human steps, variants, recovery planner, planner, API and mock-app tests; no browser, no API key
+pnpm test:integration   # real headless Chromium against the in-process mock app: replay, discover → compile → replay, every chaos mode, the gate at both layers, masking, every escalation path including the live console API, both tenants, and assisted fallback with a scripted planner; no API key
 pnpm typecheck
 pnpm lint
 ```

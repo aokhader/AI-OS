@@ -19,17 +19,21 @@
 <div class="ttl"><%= labels.accounts %></div>
 <table cellpadding="4" cellspacing="0" border="1" class="box">
 <tr>
-<td class="lbl">Type</td>
-<td class="lbl">Number</td>
-<td class="lbl" align="right">Balance</td>
-<td class="lbl">Opened</td>
+<% for (const col of accountColumns) { %>
+<% if (col === 'type') { %><td class="lbl">Type</td><% } %>
+<% if (col === 'number') { %><td class="lbl">Number</td><% } %>
+<% if (col === 'balance') { %><td class="lbl" align="right">Balance</td><% } %>
+<% if (col === 'opened') { %><td class="lbl">Opened</td><% } %>
+<% } %>
 </tr>
 <% for (const account of member.accounts) { %>
 <tr>
-<td><%= account.type %></td>
-<td><%= account.number %></td>
-<td align="right"><%= formatMoney(account.balance) %></td>
-<td><%= account.opened %></td>
+<% for (const col of accountColumns) { %>
+<% if (col === 'type') { %><td><%= account.type %></td><% } %>
+<% if (col === 'number') { %><td><%= account.number %></td><% } %>
+<% if (col === 'balance') { %><td align="right"><%= formatMoney(account.balance) %></td><% } %>
+<% if (col === 'opened') { %><td><%= account.opened %></td><% } %>
+<% } %>
 </tr>
 <% } %>
 </table>

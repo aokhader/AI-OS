@@ -96,8 +96,16 @@ program
     'origin of the target app (default HANDSOFF_TARGET_URL or http://localhost:4100)',
   )
   .option('--chaos <modes>', 'comma-separated chaos modes for the mock app')
+  .option(
+    '--variant <variantId>',
+    'variant the target must fingerprint as (default: whichever single variant matches)',
+  )
   .option('--headless', 'run the browser headless (default HANDSOFF_HEADLESS)')
   .option('--operator <mode>', OPERATOR_HELP)
+  .option(
+    '--assisted',
+    'enable policy.assistedFallback for this run: on TARGET_NOT_FOUND or CHECKPOINT_FAILED ask the configured model for one action (needs a provider key)',
+  )
   .option('--data-dir <dir>', 'data directory (default HANDSOFF_DATA_DIR or ./data)')
   .action(
     async (opts: {
@@ -106,8 +114,10 @@ program
       param: string[];
       baseUrl?: string;
       chaos?: string;
+      variant?: string;
       headless?: boolean;
       operator?: string;
+      assisted?: boolean;
       dataDir?: string;
     }) => {
       process.exitCode = await runReplayCommand(opts);

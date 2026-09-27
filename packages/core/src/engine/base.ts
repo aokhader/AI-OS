@@ -10,6 +10,7 @@ import {
   RECORDED_SAFE_APPROVED,
 } from '../policy/gate.js';
 import type { EscalationControls, Operator } from '../ports/operator.js';
+import type { RecoveryPlanner } from '../ports/planner.js';
 import type { RunHandle, Store } from '../ports/store.js';
 import type {
   ActResult,
@@ -18,12 +19,19 @@ import type {
   Surface,
   SurfaceObservation,
 } from '../ports/surface.js';
-import { redactJson, redactText, type SensitiveValue, shouldMask } from '../redact.js';
+import {
+  redactJson,
+  redactObservation,
+  redactText,
+  type SensitiveValue,
+  shouldMask,
+} from '../redact.js';
 import { describeTarget, resolveTarget } from '../resolve/resolve-target.js';
 import {
   type A11yNode,
   type Action,
   type AppProfile,
+  actionParams,
   actionTarget,
   type Baseline,
   type BootstrapStep,
@@ -63,6 +71,8 @@ export interface EngineDeps {
   env?: Record<string, string | undefined> | undefined;
   /** Answers `confirm` verdicts (D-034). Without one, replay stops before a risky step. */
   operator?: Operator | undefined;
+  /** The only model on the replay path, behind policy.assistedFallback (01 §15, D-038). */
+  recoveryPlanner?: RecoveryPlanner | undefined;
   now?: (() => Date) | undefined;
   log?: ((line: string) => void) | undefined;
 }
@@ -243,6 +253,8 @@ export abstract class EngineBase {
   private readonly recoveryCounts = new Map<string, number>();
   private readonly attempts = new Map<string, number>();
   protected rebootstraps = 0;
+  /** Assisted proposals made this run, against policy.assistedFallback.maxPerRun. */
+  protected assisted = 0;
   // ---- control transfer (01 §11) ----
   protected controlOwner: ControlOwner = 'automation';
   protected readonly humanActions: RecordedStep[] = [];
@@ -415,20 +427,45 @@ export abstract class EngineBase {
       });
       const res = resolveTarget(before.nodes, targetRef.spec);
       if (!res.found) {
-        await this.snapshot(stepId, before);
         const tried = res.tried
           .map((t) => `strategy ${t.index + 1}: ${t.candidateCount} candidate(s)`)
           .join(', ');
         const nearest = res.nearest.map((n) => `${n.role} "${n.name}"`).join(', ') || 'none';
-        throw new Stop(
-          {
-            kind: 'failure',
-            failure: 'TARGET_NOT_FOUND',
-            expected: describeTarget(targetRef.spec),
-            observed: `${tried}; nearest: ${nearest}`,
-          },
-          stepId,
-        );
+        const expected = describeTarget(targetRef.spec);
+        const observed = `${tried}; nearest: ${nearest}`;
+        // Assisted fallback (01 §15): one proposed action may stand in for the step's own.
+        const helped =
+          'baseline' in step && step.action.kind !== 'extract'
+            ? await this.assist({
+                step,
+                failure: 'TARGET_NOT_FOUND',
+                expected,
+                observed,
+                obs: before,
+                values,
+                detectors,
+              })
+            : undefined;
+        if (!helped) {
+          await this.snapshot(stepId, before);
+          throw new Stop(
+            { kind: 'failure', failure: 'TARGET_NOT_FOUND', expected, observed },
+            stepId,
+          );
+        }
+        const after = await this.settled('after', stepId, detectors, {
+          condition: step.postcondition,
+          met: true,
+          detail: 'met after an assisted recovery',
+        });
+        if (step.risk === 'risky') {
+          this.riskyExecuted = true;
+          this.riskyConfirmed = true;
+        }
+        if (!isBootstrap) {
+          this.report({ stepId, attempts: attempt, durationMs: Date.now() - started, drift: true });
+        }
+        return after;
       }
       node = res.node;
       resolvedBy = res.resolvedBy;
@@ -525,10 +562,27 @@ export abstract class EngineBase {
       await this.snapshot(stepId, post.obs);
       await this.raise(post.verdict, stepId);
     }
+    let met = post.matched;
+    let detail = post.detail;
+    if (!met && 'baseline' in step) {
+      const helped = await this.assist({
+        step,
+        failure: 'CHECKPOINT_FAILED',
+        expected: describePredicate(step.postcondition.when),
+        observed: post.detail,
+        obs: post.obs,
+        values,
+        detectors,
+      });
+      if (helped) {
+        met = true;
+        detail = 'met after an assisted recovery';
+      }
+    }
     const after = await this.settled('after', stepId, detectors, {
       condition: step.postcondition,
-      met: post.matched,
-      detail: post.detail,
+      met,
+      detail,
     });
     if (risk === 'risky') this.riskyConfirmed = true;
 
@@ -1004,6 +1058,148 @@ export abstract class EngineBase {
     return redactText(`${node.role} "${node.name}"`, this.sensitive);
   }
 
+  // ---- assisted fallback (01 §15, D-038) ------------------------------------------------------
+
+  /**
+   * One model call, one action, re-verified against the step's own postcondition, within
+   * policy.assistedFallback.maxPerRun. The proposal passes the policy gate like any action and a
+   * risky one is refused: an assisted recovery never commits anything. Returns the observation on
+   * which the postcondition held, or undefined when the original failure stands.
+   */
+  protected async assist(input: {
+    step: Step;
+    failure: 'TARGET_NOT_FOUND' | 'CHECKPOINT_FAILED';
+    expected: string;
+    observed: string;
+    obs: SurfaceObservation;
+    values: ParamValues;
+    detectors: Condition[];
+  }): Promise<SurfaceObservation | undefined> {
+    const planner = this.deps.recoveryPlanner;
+    const config = this.policy.assistedFallback;
+    if (!planner || !config.enabled || this.phase !== 'replay') return undefined;
+    const { step, obs, values } = input;
+    const stepId = step.id;
+    const attempt = this.assisted + 1;
+    if (attempt > config.maxPerRun) {
+      this.log(
+        `assisted: budget of ${config.maxPerRun} proposal(s) per run exhausted at ${stepId}`,
+      );
+      return undefined;
+    }
+    this.assisted = attempt;
+    const remaining = config.maxPerRun - attempt;
+    const routine: RecoveryRoutine = { kind: 'assisted' };
+    const record = (outcome: Recovery['outcome'], proposal?: Action) =>
+      this.recordRecovery(
+        stepId,
+        step.postcondition,
+        routine,
+        attempt,
+        outcome,
+        remaining,
+        proposal,
+      );
+    this.log(
+      `assisted: ${input.failure} at ${stepId}; asking ${planner.info().model} for one action`,
+    );
+    let proposal: Action | null = null;
+    try {
+      proposal = await planner.proposeOne({
+        observation: {
+          ...redactObservation(obs, this.sensitive),
+          ...(obs.screenshotPng ? { screenshotPng: obs.screenshotPng } : {}),
+        },
+        step,
+        expected: input.expected,
+        observed: input.observed,
+      });
+    } catch (err) {
+      this.log(`assisted: planner failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (!proposal) {
+      this.log('assisted: no proposal');
+      await record('failed');
+      return undefined;
+    }
+    const ref = actionTarget(proposal);
+    const node = ref && 'ref' in ref ? obs.nodes.find((n) => n.ref === ref.ref) : undefined;
+    if (ref && !node) {
+      this.log('assisted: the proposal targets an element that is not on the page');
+      await record('failed', proposal);
+      return undefined;
+    }
+    if (actionParams(proposal).some((u) => !(u.param in values))) {
+      this.log('assisted: the proposal uses an unknown parameter');
+      await record('failed', proposal);
+      return undefined;
+    }
+    const gate = checkPolicy(this.policy, {
+      action: proposal,
+      node,
+      observation: obs,
+      phase: 'replay',
+      baseUrl: this.baseUrl,
+      values,
+      recorded: { risk: step.risk, confirm: step.confirm, approved: this.approved },
+    });
+    await this.event({
+      type: 'policy_check',
+      actor: 'automation',
+      stepId,
+      action: proposal,
+      verdict: gate.verdict,
+      liveRisk: gate.liveRisk,
+      recordedRisk: step.risk,
+      mismatch: gate.mismatch,
+    });
+    if (gate.verdict.kind !== 'allow' || gate.verdict.risk === 'risky') {
+      this.log(
+        `assisted: proposal refused (${gate.verdict.kind === 'allow' ? 'risky' : gate.verdict.rule}); an assisted recovery never runs a risky action`,
+      );
+      await record('failed', proposal);
+      return undefined;
+    }
+    await this.event({
+      type: 'decision',
+      actor: 'automation',
+      stepId,
+      decision: { kind: 'tool', action: proposal, intent: `assisted recovery of ${stepId}` },
+      intent: `assisted recovery of ${stepId}`,
+    });
+    const started = Date.now();
+    const r = await this.act(proposal, values);
+    await this.event({
+      type: 'action',
+      actor: 'automation',
+      stepId,
+      action: proposal,
+      durationMs: Date.now() - started,
+    });
+    if (!r.ok) {
+      this.log(`assisted: the proposal failed to execute: ${r.reason}: ${r.detail}`);
+      await record('failed', proposal);
+      return undefined;
+    }
+    const post = await this.waitFor(
+      step.postcondition,
+      step.postcondition.when.timeoutMs ?? this.stepTimeoutMs,
+      stepId,
+      input.detectors,
+    );
+    if (post.verdict) {
+      await this.snapshot(stepId, post.obs);
+      await this.raise(post.verdict, stepId);
+    }
+    if (!post.matched) {
+      this.log(`assisted: the postcondition still does not hold: ${post.detail}`);
+      await record('failed', proposal);
+      return undefined;
+    }
+    await record('recovered', proposal);
+    return post.obs;
+  }
+
   // ---- recoveries ----------------------------------------------------------------------------
 
   /**
@@ -1122,6 +1318,7 @@ export abstract class EngineBase {
     attempt: number,
     outcome: Recovery['outcome'],
     budgetRemaining: number,
+    proposal?: Action,
   ): Promise<void> {
     const recovery: Recovery = {
       stepId,
@@ -1129,6 +1326,7 @@ export abstract class EngineBase {
       routine,
       attempt,
       outcome,
+      ...(proposal ? { proposal } : {}),
       at: this.now().toISOString(),
     };
     this.recoveries.push(recovery);

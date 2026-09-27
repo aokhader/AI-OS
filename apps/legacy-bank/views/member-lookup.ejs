@@ -9,8 +9,17 @@
 <tr>
 <td class="lbl"><%= labels.memberNumber %></td>
 <td><input type="text" name="mno" size="12" maxlength="12" value="<%= mno %>"></td>
+<% if (typeof relabel !== 'undefined' && relabel) { %>
+<td>&nbsp;</td>
+<% } else { %>
 <td><input type="submit" value="<%= labels.search %>"></td>
+<% } %>
 </tr>
+<% if (typeof relabel !== 'undefined' && relabel) { %>
+<tr>
+<td colspan="3" align="right"><input type="submit" value="Look up member"></td>
+</tr>
+<% } %>
 </table>
 </form>
 <p class="note"><font size="1">Enter the member number exactly as printed on the member card.</font></p>
